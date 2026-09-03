@@ -1,3 +1,4 @@
 line one
 line two : edit from A branch
+line two : edit from B branch
 line three
