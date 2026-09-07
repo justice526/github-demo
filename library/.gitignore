@@ -1,0 +1,11 @@
+# SQLite数据库文件
+library/*.db
+
+# Python字节码缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode本地配置
+.vscode/
