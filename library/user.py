@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import base64
 
 def get_conn():
     """复用获取数据库连接工具函数"""
@@ -7,6 +8,15 @@ def get_conn():
     conn = sqlite3.connect(db_path)
     return conn
 
+def encrypt_pwd(raw_pwd):
+    """密码简单加密，教学演示"""
+    byte_data = raw_pwd.encode("utf‑8")
+    return base64.b64encode(byte_data).decode("utf‑8")
+
+def decrypt_pwd(enc_pwd):
+    """解密密码，登录校验使用"""
+    byte_data = enc_pwd.encode("utf‑8")
+    return base64.b64decode(byte_data).decode("utf‑8")
 
 def register_user(username, password):
     """用户注册
@@ -17,7 +27,8 @@ def register_user(username, password):
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO user(username,password) VALUES (?, ?)", (username, password))
+        pwd_enc = encrypt_pwd(password)
+        cur.execute("INSERT INTO user(username,password) VALUES (?, ?)", (username, pwd_enc))
         conn.commit()
         return True
     except Exception as e:
@@ -33,13 +44,14 @@ def login_user(username, password):
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM user WHERE username=? AND password=?", (username, password))
+    cur.execute("SELECT id,password FROM user WHERE username=?", (username,))
     row = cur.fetchone()
     conn.close()
     if row:
-        return row[0]
-    else:
-        return None
+        uid, db_enc_pwd = row
+        if decrypt_pwd(db_enc_pwd) == password:
+            return uid
+    return None
 
 
 # 自测代码
