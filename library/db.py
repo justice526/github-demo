@@ -39,6 +39,21 @@ def init_db():
     )
     ''')
 
+    #借阅表，penalty罚款金额，return_deadline归还截止日期
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS borrow_record(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        book_id INTEGER,
+        borrow_time TEXT,
+        return_deadline TEXT,
+        return_time TEXT,
+        penalty REAL DEFAULT 0,
+        FOREIGN KEY(user_id) REFERENCES user(id),
+        FOREIGN KEY(book_id) REFERENCES book(id)
+    )
+    ''')
+
     conn.commit()  # 提交建表改动到数据库
     conn.close()   # 关闭数据库连接
 
