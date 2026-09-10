@@ -1,21 +1,19 @@
 import sqlite3
 import os
-
 def init_db():
     """初始化数据库，创建三张数据表：用户表、图书表、借阅记录表"""
     # 连接SQLite数据库，文件存放在library/library.db
     conn = sqlite3.connect(os.path.join(os.path.dirname(__file__), "library.db"))
     cur = conn.cursor()
-
-    # 1. 用户表 user：id 主键，用户名，密码
+    # 1. 用户表 user：id 主键，用户名，密码，新增余额balance
     cur.execute('''
     CREATE TABLE IF NOT EXISTS user (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        balance REAL DEFAULT 0
     )
     ''')
-
     # 2.图书表 book
     cur.execute('''
     CREATE TABLE IF NOT EXISTS book (
@@ -25,23 +23,9 @@ def init_db():
         is_borrow INTEGER DEFAULT 0
     )
     ''')
-
     #3.借阅记录 borrow_record
     cur.execute('''
     CREATE TABLE IF NOT EXISTS borrow_record (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        book_id INTEGER,
-        borrow_time TEXT,
-        return_time TEXT,
-        FOREIGN KEY(user_id) REFERENCES user(id),
-        FOREIGN KEY(book_id) REFERENCES book(id)
-    )
-    ''')
-
-    #借阅表，penalty罚款金额，return_deadline归还截止日期
-    cur.execute('''
-    CREATE TABLE IF NOT EXISTS borrow_record(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         book_id INTEGER,

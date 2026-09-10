@@ -1,5 +1,6 @@
 from book import add_book, query_all_book, update_book, delete_book
-from user import register_user, login_user
+# 新增导入余额相关函数
+from user import register_user, login_user, get_balance, recharge_balance, pay_fine
 from borrow import borrow_book, return_book, get_borrow_record
 
 
@@ -14,6 +15,8 @@ def show_menu():
     print("7. 借阅图书")
     print("8. 归还图书")
     print("9. 查看我的借阅记录")
+    print("10. 用户余额充值")
+    print("11. 缴纳借阅罚款")
     print("0. 退出程序")
     print("==========================")
 
@@ -30,17 +33,16 @@ def main():
                 print("✅注册成功")
             else:
                 print("❌注册失败，用户名重复")
-
         elif opt == "2":
             username = input("输入用户名：")
             pwd = input("输入密码：")
             uid = login_user(username, pwd)
             if uid:
                 current_user_id = uid
-                print(f"✅登录成功，你的用户ID:{current_user_id}")
+                bal = get_balance(current_user_id)
+                print(f"✅登录成功，你的用户ID:{current_user_id}，当前余额：{bal}元")
             else:
                 print("❌账号或密码错误")
-
         elif opt == "3":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -49,13 +51,11 @@ def main():
             author = input("作者：")
             add_book(title, author)
             print("✅图书添加完成")
-
         elif opt == "4":
             books = query_all_book()
             print("\n全部图书：")
             for item in books:
                 print(item)
-
         elif opt == "5":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -65,7 +65,6 @@ def main():
             new_author = input("新作者：")
             update_book(bid, new_title, new_author)
             print("✅修改完成")
-
         elif opt == "6":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -73,7 +72,6 @@ def main():
             bid = int(input("要删除的图书ID："))
             delete_book(bid)
             print("✅已删除")
-
         elif opt == "7":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -84,7 +82,6 @@ def main():
                 print("✅借阅成功")
             else:
                 print("❌借阅失败，图书不存在或已经借出")
-
         elif opt == "8":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -92,7 +89,6 @@ def main():
             bid = int(input("归还图书ID："))
             return_book(bid)
             print("✅归还完成")
-
         elif opt == "9":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -101,7 +97,30 @@ def main():
             print("\n你的借阅记录：")
             for r in records:
                 print(r)
-
+        # =========新增：10 余额充值=========
+        elif opt == "10":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            try:
+                money = float(input("请输入充值金额："))
+                recharge_balance(current_user_id, money)
+                new_bal = get_balance(current_user_id)
+                print(f"你的最新余额：{new_bal} 元")
+            except ValueError:
+                print("❌输入不是有效数字！")
+        # =========新增：11 缴纳罚款=========
+        elif opt == "11":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            try:
+                fine = float(input("请输入要缴纳的罚款金额："))
+                pay_fine(current_user_id, fine)
+                new_bal = get_balance(current_user_id)
+                print(f"你的最新余额：{new_bal} 元")
+            except ValueError:
+                print("❌输入不是有效数字！")
         elif opt == "0":
             print("👋程序退出")
             break
