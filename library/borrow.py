@@ -97,6 +97,21 @@ def get_borrow_record(user_id):
     conn.close()
     return rows
 
+def get_user_total_penalty(user_id):
+    """获取用户全部未结清罚款总和"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT SUM(penalty) FROM borrow_record
+        WHERE user_id = ? AND penalty > 0
+    ''', (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    total = row[0]
+    # SUM无数据返回None，转为0.0防止程序报错
+    if total is None:
+        return 0.0
+    return round(total,2)
 
 if __name__ == "__main__":
     # 自测：假设用户id=1，图书id=1

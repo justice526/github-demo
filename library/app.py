@@ -1,8 +1,6 @@
 from book import add_book, query_all_book, update_book, delete_book
-# 新增导入余额相关函数
 from user import register_user, login_user, get_balance, recharge_balance, pay_fine
-from borrow import borrow_book, return_book, get_borrow_record
-
+from borrow import borrow_book, return_book, get_borrow_record, get_user_total_penalty
 
 def show_menu():
     print("\n=====个人图书管理系统=====")
@@ -19,7 +17,6 @@ def show_menu():
     print("11. 缴纳借阅罚款")
     print("0. 退出程序")
     print("==========================")
-
 
 def main():
     current_user_id = None
@@ -97,7 +94,9 @@ def main():
             print("\n你的借阅记录：")
             for r in records:
                 print(r)
-        # =========新增：10 余额充值=========
+            # 新增：展示总待缴罚款
+            total_fine = get_user_total_penalty(current_user_id)
+            print(f"\n💸你的待缴纳总罚款：{total_fine} 元")
         elif opt == "10":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -109,24 +108,27 @@ def main():
                 print(f"你的最新余额：{new_bal} 元")
             except ValueError:
                 print("❌输入不是有效数字！")
-        # =========新增：11 缴纳罚款=========
         elif opt == "11":
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            try:
-                fine = float(input("请输入要缴纳的罚款金额："))
-                pay_fine(current_user_id, fine)
+            total_fine = get_user_total_penalty(current_user_id)
+            print(f"💸待缴纳总罚款：{total_fine} 元")
+            if total_fine <= 0:
+                print("✅你没有需要缴纳的罚款")
+                continue
+            confirm = input(f"确认缴纳全部{total_fine}元罚款？(y/n):")
+            if confirm.lower() == "y":
+                pay_fine(current_user_id, total_fine)
                 new_bal = get_balance(current_user_id)
-                print(f"你的最新余额：{new_bal} 元")
-            except ValueError:
-                print("❌输入不是有效数字！")
+                print(f"✅罚款缴纳完毕，当前余额：{new_bal} 元")
+            else:
+                print("❌取消缴费")
         elif opt == "0":
             print("👋程序退出")
             break
         else:
             print("❌无效输入，请重新选择")
-
 
 if __name__ == "__main__":
     main()
