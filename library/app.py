@@ -1,6 +1,7 @@
-from book import add_book, query_all_book, update_book, delete_book
+from book import add_book, query_all_book, update_book, delete_book, search_book
 from user import register_user, login_user, get_balance, recharge_balance, pay_fine
 from borrow import borrow_book, return_book, get_borrow_record, get_user_total_penalty
+
 
 def show_menu():
     print("\n=====个人图书管理系统=====")
@@ -15,8 +16,10 @@ def show_menu():
     print("9. 查看我的借阅记录")
     print("10. 用户余额充值")
     print("11. 缴纳借阅罚款")
+    print("12. 模糊搜索图书")
     print("0. 退出程序")
     print("==========================")
+
 
 def main():
     current_user_id = None
@@ -94,7 +97,7 @@ def main():
             print("\n你的借阅记录：")
             for r in records:
                 print(r)
-            # 新增：展示总待缴罚款
+            # 展示总待缴罚款
             total_fine = get_user_total_penalty(current_user_id)
             print(f"\n💸你的待缴纳总罚款：{total_fine} 元")
         elif opt == "10":
@@ -124,11 +127,23 @@ def main():
                 print(f"✅罚款缴纳完毕，当前余额：{new_bal} 元")
             else:
                 print("❌取消缴费")
+        elif opt == "12":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            key = input("请输入书名/作者关键词搜索：")
+            res_list = search_book(key)
+            if len(res_list) == 0:
+                print("没有找到匹配图书")
+            else:
+                for item in res_list:
+                    print(f"id:{item[0]} 书名:{item[1]} 作者:{item[2]} 分类:{item[3]} 是否借出:{item[4]}")
         elif opt == "0":
             print("👋程序退出")
             break
         else:
             print("❌无效输入，请重新选择")
+
 
 if __name__ == "__main__":
     main()

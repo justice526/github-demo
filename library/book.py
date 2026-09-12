@@ -63,6 +63,25 @@ def query_book_by_category(category_name):
     conn.close()
     return result
 
+def search_book(keyword):
+    """
+    模糊搜索图书，匹配书名或者作者
+    :param keyword: 搜索关键词
+    :return: 查询到的图书列表
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    sql = """
+    SELECT id,title,author,category,is_borrow
+    FROM book
+    WHERE title LIKE ? OR author LIKE ?
+    """
+    like_word = f"%{keyword}%"
+    cur.execute(sql,(like_word,like_word))
+    result = cur.fetchall()
+    conn.close()
+    return result
+
 # 自测入口
 if __name__ == "__main__":
     # 测试新增，第三个参数传分类
