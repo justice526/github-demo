@@ -113,6 +113,36 @@ def get_user_total_penalty(user_id):
         return 0.0
     return round(total,2)
 
+def export_borrow_record_to_txt(user_id, save_path="borrow_record.txt"):
+    """
+    将用户借阅记录导出为txt文本文件
+    :param user_id: 用户id
+    :param save_path: 输出txt保存路径
+    :return: True成功 / False失败
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    sql = """
+    SELECT br.book_id, b.title, br.borrow_time, br.return_deadline, br.return_time, br.penalty
+    FROM borrow_record br
+    LEFT JOIN book b ON br.book_id = b.id
+    WHERE br.user_id = ?
+    """
+    cur.execute(sql,(user_id,))
+    records = cur.fetchall()
+    conn.close()
+
+    try:
+        with open(save_path,"w",encoding="utf-8") as f:
+            f.write("====用户借阅记录====\n")
+            for row in records:
+                bid, title, borrow_t, deadline, return_t, penalty = row
+                f.write(f"图书ID:{bid}《{title}》|借阅:{borrow_t} |截止:{deadline} |归还:{return_t} |罚款:{penalty}元\n")
+        return True
+    except Exception as e:
+        print("导出异常：",e)
+        return False
+
 if __name__ == "__main__":
     # 自测：假设用户id=1，图书id=1
     ok = borrow_book(1,1)

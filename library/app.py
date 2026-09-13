@@ -1,6 +1,6 @@
-from book import add_book, query_all_book, update_book, delete_book, search_book
-from user import register_user, login_user, get_balance, recharge_balance, pay_fine
-from borrow import borrow_book, return_book, get_borrow_record, get_user_total_penalty
+from book import *
+from user import *
+from borrow import *
 
 
 def show_menu():
@@ -17,6 +17,7 @@ def show_menu():
     print("10. 用户余额充值")
     print("11. 缴纳借阅罚款")
     print("12. 模糊搜索图书")
+    print("13. 导出借阅记录到txt")
     print("0. 退出程序")
     print("==========================")
 
@@ -138,6 +139,15 @@ def main():
             else:
                 for item in res_list:
                     print(f"id:{item[0]} 书名:{item[1]} 作者:{item[2]} 分类:{item[3]} 是否借出:{item[4]}")
+        elif opt == "13":
+            if not current_user_id:
+                print("⚠请先登录！")
+            continue
+            ok = export_borrow_record_to_txt(current_user_id)
+            if ok:
+                print("✅导出成功，文件：borrow_record.txt")
+            else:
+                print("❌导出文件失败")
         elif opt == "0":
             print("👋程序退出")
             break
