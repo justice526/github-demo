@@ -18,6 +18,7 @@ def show_menu():
     print("11. 缴纳借阅罚款")
     print("12. 模糊搜索图书")
     print("13. 导出借阅记录到txt")
+    print("14. 从txt批量导入图书")
     print("0. 退出程序")
     print("==========================")
 
@@ -50,7 +51,8 @@ def main():
                 continue
             title = input("图书名称：")
             author = input("作者：")
-            add_book(title, author)
+            category = input("图书分类：")
+            add_book(title, author, category)
             print("✅图书添加完成")
         elif opt == "4":
             books = query_all_book()
@@ -98,7 +100,6 @@ def main():
             print("\n你的借阅记录：")
             for r in records:
                 print(r)
-            # 展示总待缴罚款
             total_fine = get_user_total_penalty(current_user_id)
             print(f"\n💸你的待缴纳总罚款：{total_fine} 元")
         elif opt == "10":
@@ -142,12 +143,19 @@ def main():
         elif opt == "13":
             if not current_user_id:
                 print("⚠请先登录！")
-            continue
+                continue
             ok = export_borrow_record_to_txt(current_user_id)
             if ok:
                 print("✅导出成功，文件：borrow_record.txt")
             else:
                 print("❌导出文件失败")
+        elif opt == "14":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            txt_path = input("请输入图书txt文件名(根目录直接输入books.txt)：")
+            s_cnt, f_cnt = batch_import_book_from_txt(txt_path)
+            print(f"✅批量导入完成：成功{s_cnt}本，失败{f_cnt}本")
         elif opt == "0":
             print("👋程序退出")
             break

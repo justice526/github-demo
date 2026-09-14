@@ -82,6 +82,47 @@ def search_book(keyword):
     conn.close()
     return result
 
+def batch_import_book_from_txt(file_path):
+    """
+    读取txt文件，批量导入图书
+    txt文件格式：一行一本图书，书名,作者,分类
+    示例txt内容：
+    西游记,吴承恩,古典文学
+    水浒传,施耐庵,古典文学
+    :param file_path: txt文件路径
+    :return: (成功数量,失败数量)
+    """
+    success = 0
+    fail = 0
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception as e:
+        print("读取txt文件异常：", e)
+        return 0, 0
+
+    for line in lines:
+        line = line.strip()
+        # 跳过空行
+        if not line:
+            continue
+        # 按逗号切割：书名,作者,分类
+        parts = line.split(",")
+        if len(parts) < 3:
+            print(f"格式错误跳过该行：{line} 要求：书名,作者,分类")
+            fail += 1
+            continue
+        title = parts[0].strip()
+        author = parts[1].strip()
+        category = parts[2].strip()
+        # 调用新增图书，传入3个参数
+        res = add_book(title, author, category)
+        if res:
+            success += 1
+        else:
+            fail += 1
+    return success, fail
+
 # 自测入口
 if __name__ == "__main__":
     # 测试新增，第三个参数传分类
