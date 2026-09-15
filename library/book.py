@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import json
+
 def get_conn():
     """获取数据库连接，封装成工具函数"""
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
@@ -122,6 +124,66 @@ def batch_import_book_from_txt(file_path):
         else:
             fail += 1
     return success, fail
+
+def backup_books_json(save_path="book_backup.json"):
+    """备份全部图书数据到json文件
+    :param save_path: 备份文件保存路径
+    :return: True成功 / False失败
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id,title,author,category,is_borrow FROM book")
+        rows = cur.fetchall()
+        # 把元组转成字典列表，方便json存储
+        book_list = []
+        for row in rows:
+            book_list.append({
+                "id": row[0],
+                "title": row[1],
+                "author": row[2],
+                "category": row[3],
+                "is_borrow": row[4]
+            })
+        with open(save_path,"w",encoding="utf‑8") as f:
+            json.dump(book_list, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print("备份异常：", e)
+        return False
+    finally:
+        conn.close()
+
+def restore_books_json(load_path="book_backup.json", overwrite=False):
+    """从json备份恢复图书
+    :param load_path: 备份文件路径
+    :param overwrite: True清空原有图书；False追加导入
+    :return: True成功 / False失败
+    """
+    if not os.path.exists(load_path):
+        print("备份文件不存在！")
+        return False
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        with open(load_path,"r",encoding="utf‑8") as f:
+            book_list = json.load(f)
+        if overwrite:
+            cur.execute("DELETE FROM book")
+        for b in book_list:
+            cur.execute(
+                "INSERT INTO book(title,author,category,is_borrow) VALUES (?,?,?,?)",
+                (b["title"], b["author"], b["category"], b["is_borrow"])
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        print("恢复异常：", e)
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
 
 # 自测入口
 if __name__ == "__main__":

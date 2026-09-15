@@ -18,10 +18,11 @@ def show_menu():
     print("11. 缴纳借阅罚款")
     print("12. 模糊搜索图书")
     print("13. 导出借阅记录到txt")
-    print("14. 从txt批量导入图书")
+    print("14. 备份图书数据JSON")
+    print("15. 从JSON恢复图书备份")
+    print("16. 从txt批量导入图书")
     print("0. 退出程序")
     print("==========================")
-
 
 def main():
     current_user_id = None
@@ -150,6 +151,26 @@ def main():
             else:
                 print("❌导出文件失败")
         elif opt == "14":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            ok = backup_books_json()
+            if ok:
+                print("✅图书备份完成，生成book_backup.json")
+            else:
+                print("❌备份失败")
+        elif opt == "15":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            op = input("恢复模式：1=追加导入，2=清空后覆盖导入，请输入1/2：")
+            ov = (op == "2")
+            ok = restore_books_json(overwrite=ov)
+            if ok:
+                print("✅数据恢复完成")
+            else:
+                print("❌恢复失败")
+        elif opt == "16":
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
