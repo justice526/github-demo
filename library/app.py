@@ -21,6 +21,7 @@ def show_menu():
     print("14. 备份图书数据JSON")
     print("15. 从JSON恢复图书备份")
     print("16. 从txt批量导入图书")
+    print("17. 查看图书统计仪表盘")
     print("0. 退出程序")
     print("==========================")
 
@@ -177,6 +178,18 @@ def main():
             txt_path = input("请输入图书txt文件名(根目录直接输入books.txt)：")
             s_cnt, f_cnt = batch_import_book_from_txt(txt_path)
             print(f"✅批量导入完成：成功{s_cnt}本，失败{f_cnt}本")
+        elif opt == "17":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            dash_data = get_book_dashboard()
+            print("\n==== 📊图书统计仪表盘 ====")
+            print(f"图书总数：{dash_data['total_book']}")
+            print(f"已借出图书：{dash_data['borrowed']}")
+            print(f"在架可借图书：{dash_data['available']}")
+            print("按分类统计：")
+            for category, count in dash_data["category_info"]:
+                print(f"  {category}：{count}本")
         elif opt == "0":
             print("👋程序退出")
             break

@@ -44,17 +44,25 @@ def update_book(book_id, new_title, new_author):
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE book SET title=?, author=? WHERE id=?", (new_title, new_author, book_id))
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute("UPDATE book SET title=?, author=? WHERE id=?", (new_title, new_author, book_id))
+        conn.commit()
+    except Exception as e:
+        print("修改图书异常：", e)
+    finally:
+        conn.close()
 
 def delete_book(book_id):
     """根据id删除图书"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM book WHERE id=?", (book_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute("DELETE FROM book WHERE id=?", (book_id,))
+        conn.commit()
+    except Exception as e:
+        print("删除图书异常：", e)
+    finally:
+        conn.close()
 
 def query_book_by_category(category_name):
     """根据图书分类名称查询图书"""
@@ -184,6 +192,39 @@ def restore_books_json(load_path="book_backup.json", overwrite=False):
     finally:
         conn.close()
 
+def get_book_dashboard():
+    """获取图书统计仪表盘数据
+    return: dict 统计字典
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # 1 全部图书总数
+    cur.execute("SELECT COUNT(*) FROM book")
+    total = cur.fetchone()[0]
+
+    # 2 已借出 is_borrow=1
+    cur.execute("SELECT COUNT(*) FROM book WHERE is_borrow=1")
+    borrowed = cur.fetchone()[0]
+
+    # 3 在架图书 is_borrow=0
+    cur.execute("SELECT COUNT(*) FROM book WHERE is_borrow=0")
+    available = cur.fetchone()[0]
+
+    # 4 按分类统计数量
+    cur.execute("SELECT category,COUNT(*) FROM book GROUP BY category")
+    category_count = cur.fetchall()
+
+    conn.close()
+
+    result = {
+        "total_book": total,
+        "borrowed": borrowed,
+        "available": available,
+        "category_info": category_count
+    }
+    return result
+
 
 # 自测入口
 if __name__ == "__main__":
@@ -195,8 +236,16 @@ if __name__ == "__main__":
     books = query_all_book()
     for b in books:
         print(b)
-
     print("\n===查询【技术】分类书籍===")
     tech_books = query_book_by_category("技术")
     for b in tech_books:
         print(b)
+
+    # 测试图书统计仪表盘
+    dash = get_book_dashboard()
+    print("\n====📊仪表盘自测输出====")
+    print(f"总图书：{dash['total_book']}")
+    print(f"已借出：{dash['borrowed']}")
+    print(f"在架：{dash['available']}")
+    for cat, num in dash["category_info"]:
+        print(f"{cat}:{num}本")
