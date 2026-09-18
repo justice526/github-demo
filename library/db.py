@@ -40,6 +40,7 @@ def init_db():
 
     conn.commit()  # 提交建表改动到数据库
     conn.close()   # 关闭数据库连接
+    
 
 if __name__ == "__main__":
     init_db()

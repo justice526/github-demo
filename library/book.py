@@ -225,6 +225,32 @@ def get_book_dashboard():
     }
     return result
 
+def get_hot_book_rank(top_n=5):
+    """
+    获取热门借阅图书排行榜
+    :param top_n: 取前N名，默认Top5
+    :return: list[(图书id,书名,作者,借阅次数)]，失败返回空列表
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # 关联borrow表和book表，统计每本书借阅次数，按次数降序
+        sql = """
+        SELECT b.id, b.title, b.author, COUNT(br.id) as borrow_cnt
+        FROM book b
+        LEFT JOIN borrow br ON b.id = br.book_id
+        GROUP BY b.id, b.title, b.author
+        ORDER BY borrow_cnt DESC
+        LIMIT ?
+        """
+        cur.execute(sql, (top_n,))
+        rows = cur.fetchall()
+        return rows
+    except Exception as e:
+        print("查询热门图书失败：", e)
+        return []
+    finally:
+        conn.close()
 
 # 自测入口
 if __name__ == "__main__":
