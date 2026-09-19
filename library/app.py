@@ -2,7 +2,6 @@ from book import *
 from user import *
 from borrow import *
 
-
 def show_menu():
     print("\n=====个人图书管理系统=====")
     print("1. 用户注册")
@@ -22,6 +21,7 @@ def show_menu():
     print("15. 从JSON恢复图书备份")
     print("16. 从txt批量导入图书")
     print("17. 查看图书统计仪表盘")
+    print("18. 热门借阅图书排行榜")
     print("0. 退出程序")
     print("==========================")
 
@@ -190,12 +190,34 @@ def main():
             print("按分类统计：")
             for category, count in dash_data["category_info"]:
                 print(f"  {category}：{count}本")
+        elif opt == "18":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            try:
+                num = input("请输入要查看排行榜前几名（直接回车默认Top5）：")
+                if not num.strip():
+                    num = 5
+                else:
+                    num = int(num)
+                    if num <=0:
+                        print("❌数字必须大于0")
+                        continue
+                rank_list = get_hot_book_rank(num)
+                print(f"\n====🔥热门借阅Top{num}排行榜====")
+                if len(rank_list) == 0:
+                    print("暂无借阅数据")
+                else:
+                    for idx, item in enumerate(rank_list):
+                        bid, title, author, cnt = item
+                        print(f"{idx+1}. 《{title}》 | {author} | 借阅次数：{cnt}")
+            except ValueError:
+                print("❌输入无效数字！")
         elif opt == "0":
             print("👋程序退出")
             break
         else:
             print("❌无效输入，请重新选择")
-
 
 if __name__ == "__main__":
     main()

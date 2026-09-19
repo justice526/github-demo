@@ -18,7 +18,8 @@ def add_book(title, author, category):
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO book(title, author, category) VALUES (?, ?, ?)", (title, author, category))
+        # 新增图书默认is_borrow=0（未借出，在架）
+        cur.execute("INSERT INTO book(title, author, category, is_borrow) VALUES (?, ?, ?, 0)", (title, author, category))
         conn.commit()
         return True
     except Exception as e:
@@ -110,7 +111,6 @@ def batch_import_book_from_txt(file_path):
     except Exception as e:
         print("读取txt文件异常：", e)
         return 0, 0
-
     for line in lines:
         line = line.strip()
         # 跳过空行
@@ -153,7 +153,7 @@ def backup_books_json(save_path="book_backup.json"):
                 "category": row[3],
                 "is_borrow": row[4]
             })
-        with open(save_path,"w",encoding="utf‑8") as f:
+        with open(save_path,"w",encoding="utf-8") as f:
             json.dump(book_list, f, ensure_ascii=False, indent=2)
         return True
     except Exception as e:
@@ -174,7 +174,7 @@ def restore_books_json(load_path="book_backup.json", overwrite=False):
     conn = get_conn()
     cur = conn.cursor()
     try:
-        with open(load_path,"r",encoding="utf‑8") as f:
+        with open(load_path,"r",encoding="utf-8") as f:
             book_list = json.load(f)
         if overwrite:
             cur.execute("DELETE FROM book")
@@ -198,25 +198,19 @@ def get_book_dashboard():
     """
     conn = get_conn()
     cur = conn.cursor()
-
     # 1 全部图书总数
     cur.execute("SELECT COUNT(*) FROM book")
     total = cur.fetchone()[0]
-
     # 2 已借出 is_borrow=1
     cur.execute("SELECT COUNT(*) FROM book WHERE is_borrow=1")
     borrowed = cur.fetchone()[0]
-
     # 3 在架图书 is_borrow=0
     cur.execute("SELECT COUNT(*) FROM book WHERE is_borrow=0")
     available = cur.fetchone()[0]
-
     # 4 按分类统计数量
     cur.execute("SELECT category,COUNT(*) FROM book GROUP BY category")
     category_count = cur.fetchall()
-
     conn.close()
-
     result = {
         "total_book": total,
         "borrowed": borrowed,
@@ -266,7 +260,6 @@ if __name__ == "__main__":
     tech_books = query_book_by_category("技术")
     for b in tech_books:
         print(b)
-
     # 测试图书统计仪表盘
     dash = get_book_dashboard()
     print("\n====📊仪表盘自测输出====")
