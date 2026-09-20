@@ -54,8 +54,11 @@ def main():
             title = input("图书名称：")
             author = input("作者：")
             category = input("图书分类：")
-            add_book(title, author, category)
-            print("✅图书添加完成")
+            res = add_book(title, author, category)
+            if res:
+                print("✅图书添加完成")
+            else:
+                print("❌添加失败")
         elif opt == "4":
             books = query_all_book()
             print("\n全部图书：")
@@ -68,15 +71,21 @@ def main():
             bid = int(input("要修改的图书ID："))
             new_title = input("新书名：")
             new_author = input("新作者：")
-            update_book(bid, new_title, new_author)
-            print("✅修改完成")
+            res = update_book(bid, new_title, new_author)
+            if res:
+                print("✅修改完成")
+            else:
+                print("❌修改失败，检查图书ID是否存在")
         elif opt == "6":
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
             bid = int(input("要删除的图书ID："))
-            delete_book(bid)
-            print("✅已删除")
+            res = delete_book(bid)
+            if res:
+                print("✅已删除")
+            else:
+                print("❌删除失败，图书ID不存在")
         elif opt == "7":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -87,13 +96,17 @@ def main():
                 print("✅借阅成功")
             else:
                 print("❌借阅失败，图书不存在或已经借出")
+        # 【修复完毕】归还图书
         elif opt == "8":
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            bid = int(input("归还图书ID："))
-            return_book(bid)
-            print("✅归还完成")
+            bid = int(input("输入归还图书ID："))
+            res = return_book(current_user_id, bid)
+            if res is not False:
+                print(f"归还成功，罚款：{res}元")
+            else:
+                print("归还失败，没有这条借阅记录")
         elif opt == "9":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -164,9 +177,10 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
+            fn = input("输入备份json文件名：")
             op = input("恢复模式：1=追加导入，2=清空后覆盖导入，请输入1/2：")
             ov = (op == "2")
-            ok = restore_books_json(overwrite=ov)
+            ok = restore_books_json(fn, overwrite=ov)
             if ok:
                 print("✅数据恢复完成")
             else:

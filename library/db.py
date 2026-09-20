@@ -4,6 +4,8 @@ def init_db():
     """初始化数据库，创建三张数据表：用户表、图书表、借阅记录表"""
     # 连接SQLite数据库，文件存放在library/library.db
     conn = sqlite3.connect(os.path.join(os.path.dirname(__file__), "library.db"))
+    # 开启外键约束
+    conn.execute("PRAGMA foreign_keys = ON;")
     cur = conn.cursor()
     # 1. 用户表 user：id 主键，用户名，密码，新增余额balance
     cur.execute('''
@@ -14,12 +16,13 @@ def init_db():
         balance REAL DEFAULT 0
     )
     ''')
-    # 2.图书表 book
+    # 2.图书表 book，补充category分类字段
     cur.execute('''
     CREATE TABLE IF NOT EXISTS book (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         author TEXT,
+        category TEXT,
         is_borrow INTEGER DEFAULT 0
     )
     ''')
@@ -37,10 +40,8 @@ def init_db():
         FOREIGN KEY(book_id) REFERENCES book(id)
     )
     ''')
-
     conn.commit()  # 提交建表改动到数据库
     conn.close()   # 关闭数据库连接
-    
 
 if __name__ == "__main__":
     init_db()
