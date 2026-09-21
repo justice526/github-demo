@@ -174,5 +174,49 @@ def get_hot_book_rank(top_n):
     conn.close()
     return res
 
+# ========== 新增：图书分类统计 ==========
+def get_category_stat():
+    """按分类统计：总数量、在架数、借出数"""
+    conn = get_conn()
+    cur = conn.cursor()
+    sql = '''
+    SELECT category,
+           COUNT(*) AS total,
+           SUM(CASE WHEN is_borrow = 0 THEN 1 ELSE 0 END) AS in_stock,
+           SUM(CASE WHEN is_borrow = 1 THEN 1 ELSE 0 END) AS borrowed
+    FROM book
+    GROUP BY category
+    '''
+    cur.execute(sql)
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        result.append({
+            "category": row[0],
+            "total": row[1],
+            "in_stock": row[2],
+            "borrowed": row[3]
+        })
+    return result
+
+# ========== 新增：分页查询图书 ==========
+def get_books_by_page(page, page_size=5):
+    """
+    分页浏览图书
+    :param page: 页码，从1开始
+    :param page_size: 每页显示条数，默认5
+    :return: (图书列表, 总条数)
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    offset = (page - 1) * page_size
+    cur.execute("SELECT id,title,author,category,is_borrow FROM book LIMIT ? OFFSET ?", (page_size, offset))
+    books = cur.fetchall()
+    cur.execute("SELECT COUNT(*) FROM book")
+    total = cur.fetchone()[0]
+    conn.close()
+    return books, total
+
 if __name__ == "__main__":
     print("book模块加载完成")

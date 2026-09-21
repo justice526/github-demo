@@ -22,6 +22,8 @@ def show_menu():
     print("16. 从txt批量导入图书")
     print("17. 查看图书统计仪表盘")
     print("18. 热门借阅图书排行榜")
+    print("19. 图书分类统计")
+    print("20. 分页浏览图书")
     print("0. 退出程序")
     print("==========================")
 
@@ -96,7 +98,7 @@ def main():
                 print("✅借阅成功")
             else:
                 print("❌借阅失败，图书不存在或已经借出")
-        # 【修复完毕】归还图书
+        # 归还图书
         elif opt == "8":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -225,6 +227,42 @@ def main():
                     for idx, item in enumerate(rank_list):
                         bid, title, author, cnt = item
                         print(f"{idx+1}. 《{title}》 | {author} | 借阅次数：{cnt}")
+            except ValueError:
+                print("❌输入无效数字！")
+        # ========== 新增：19 分类统计 ==========
+        elif opt == "19":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            stat_list = get_category_stat()
+            print("\n==== 📚图书分类统计 ====")
+            if not stat_list:
+                print("暂无图书数据")
+            else:
+                for item in stat_list:
+                    print(f"分类：{item['category']} | 总计：{item['total']}本 | 在架：{item['in_stock']}本 | 已借出：{item['borrowed']}本")
+        # ========== 新增：20 分页浏览 ==========
+        elif opt == "20":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            try:
+                page = input("请输入页码（直接回车默认第1页）：")
+                page = int(page) if page.strip() else 1
+                page_size = input("每页显示条数（直接回车默认5条）：")
+                page_size = int(page_size) if page_size.strip() else 5
+                if page < 1 or page_size < 1:
+                    print("❌页码和条数必须大于0")
+                    continue
+                books, total = get_books_by_page(page, page_size)
+                total_page = (total + page_size - 1) // page_size
+                print(f"\n==== 第 {page}/{total_page} 页，共 {total} 本图书 ====")
+                if not books:
+                    print("该页没有图书")
+                else:
+                    for b in books:
+                        status = "已借出" if b[4] == 1 else "可借阅"
+                        print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 分类：{b[3]} | 状态：{status}")
             except ValueError:
                 print("❌输入无效数字！")
         elif opt == "0":
