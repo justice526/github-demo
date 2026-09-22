@@ -24,6 +24,8 @@ def show_menu():
     print("18. 热门借阅图书排行榜")
     print("19. 图书分类统计")
     print("20. 分页浏览图书")
+    print("21. 查看我的逾期图书")
+    print("22. 续借图书")
     print("0. 退出程序")
     print("==========================")
 
@@ -229,7 +231,7 @@ def main():
                         print(f"{idx+1}. 《{title}》 | {author} | 借阅次数：{cnt}")
             except ValueError:
                 print("❌输入无效数字！")
-        # ========== 新增：19 分类统计 ==========
+        # 19 图书分类统计
         elif opt == "19":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -241,7 +243,7 @@ def main():
             else:
                 for item in stat_list:
                     print(f"分类：{item['category']} | 总计：{item['total']}本 | 在架：{item['in_stock']}本 | 已借出：{item['borrowed']}本")
-        # ========== 新增：20 分页浏览 ==========
+        # 20 分页浏览图书
         elif opt == "20":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -263,6 +265,45 @@ def main():
                     for b in books:
                         status = "已借出" if b[4] == 1 else "可借阅"
                         print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 分类：{b[3]} | 状态：{status}")
+            except ValueError:
+                print("❌输入无效数字！")
+        # ========== 新增：21 我的逾期图书 ==========
+        elif opt == "21":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            overdue_list = get_my_overdue_books(current_user_id)
+            print("\n==== ⚠️我的逾期图书 ====")
+            if not overdue_list:
+                print("✅你没有逾期未还的图书")
+            else:
+                total_penalty = 0
+                for item in overdue_list:
+                    print(f"《{item['title']}》")
+                    print(f"  借阅时间：{item['borrow_time']}")
+                    print(f"  原截止时间：{item['deadline']}")
+                    print(f"  已逾期：{item['overdue_days']}天")
+                    print(f"  当前罚款：{item['current_penalty']}元")
+                    total_penalty += item['current_penalty']
+                print(f"\n💸当前累计逾期罚款：{round(total_penalty, 2)}元")
+
+        # ========== 新增：22 续借图书 ==========
+        elif opt == "22":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            try:
+                bid = int(input("请输入要续借的图书ID："))
+                days = input("续借天数（直接回车默认7天）：")
+                days = int(days) if days.strip() else 7
+                if days <= 0:
+                    print("❌续借天数必须大于0")
+                    continue
+                res = renew_book(current_user_id, bid, days)
+                if res:
+                    print(f"✅续借成功，新的归还截止时间：{res}")
+                else:
+                    print("❌续借失败，未找到该借阅记录")
             except ValueError:
                 print("❌输入无效数字！")
         elif opt == "0":

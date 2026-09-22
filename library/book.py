@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import json
+from datetime import datetime, timedelta
 
 def get_conn():
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
@@ -217,6 +218,76 @@ def get_books_by_page(page, page_size=5):
     total = cur.fetchone()[0]
     conn.close()
     return books, total
+
+def get_my_overdue_books(user_id):
+    """
+    查询当前用户所有逾期未归还的图书
+    :param user_id: 用户ID
+    :return: list[dict] 逾期图书列表
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    now = datetime.now()
+    sql = '''
+        SELECT br.id, b.title, br.borrow_time, br.return_deadline
+        FROM borrow_record br
+        LEFT JOIN book b ON br.book_id = b.id
+        WHERE br.user_id = ? AND br.return_time IS NULL
+    '''
+    cur.execute(sql, (user_id,))
+    rows = cur.fetchall()
+    conn.close()
+    
+    overdue_list = []
+    for row in rows:
+        deadline = datetime.strptime(row[3], "%Y-%m-%d %H:%M:%S")
+        if now > deadline:
+            delta_days = (now - deadline).total_seconds() / (24 * 3600)
+            penalty = round(delta_days * 0.5, 2)
+            overdue_list.append({
+                "record_id": row[0],
+                "title": row[1],
+                "borrow_time": row[2],
+                "deadline": row[3],
+                "overdue_days": round(delta_days, 1),
+                "current_penalty": penalty
+            })
+    return overdue_list
+
+def renew_book(user_id, book_id, add_days=7):
+    """
+    续借图书，在原截止时间基础上延长借阅期限
+    :param user_id: 用户ID
+    :param book_id: 图书ID
+    :param add_days: 续借天数，默认7天
+    :return: 成功返回新截止时间字符串，失败返回False
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    # 查询该用户这本未归还的借阅记录
+    cur.execute('''
+        SELECT return_deadline FROM borrow_record
+        WHERE user_id = ? AND book_id = ? AND return_time IS NULL
+    ''', (user_id, book_id))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False
+    
+    # 原截止时间基础上增加天数
+    old_deadline = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+    new_deadline = old_deadline + timedelta(days=add_days)
+    new_deadline_str = new_deadline.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 更新截止时间
+    cur.execute('''
+        UPDATE borrow_record
+        SET return_deadline = ?
+        WHERE user_id = ? AND book_id = ? AND return_time IS NULL
+    ''', (new_deadline_str, user_id, book_id))
+    conn.commit()
+    conn.close()
+    return new_deadline_str
 
 if __name__ == "__main__":
     print("book模块加载完成")
