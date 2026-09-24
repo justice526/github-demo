@@ -43,14 +43,31 @@ def update_book(book_id, new_title, new_author):
     return affected > 0
 
 def delete_book(book_id):
-    """删除图书"""
+    """删除图书（安全校验：存在未归还借阅则禁止删除）
+    :return: True成功；False失败
+    """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM book WHERE id=?", (book_id,))
-    conn.commit()
-    cnt = cur.rowcount
-    conn.close()
-    return cnt > 0
+    try:
+        # 先检查是否有未归还的借阅记录
+        cur.execute('''
+            SELECT COUNT(*) FROM borrow_record
+            WHERE book_id = ? AND return_time IS NULL
+        ''', (book_id,))
+        borrow_cnt = cur.fetchone()[0]
+        if borrow_cnt > 0:
+            print("删除失败：该图书存在未归还的借阅记录")
+            return False
+        
+        cur.execute("DELETE FROM book WHERE id=?", (book_id,))
+        conn.commit()
+        cnt = cur.rowcount
+        return cnt > 0
+    except Exception as e:
+        print("删除图书异常：", e)
+        return False
+    finally:
+        conn.close()
 
 def search_book(keyword):
     """模糊搜索图书"""
@@ -175,7 +192,7 @@ def get_hot_book_rank(top_n):
     conn.close()
     return res
 
-# ========== 新增：图书分类统计 ==========
+# ========== 图书分类统计 ==========
 def get_category_stat():
     """按分类统计：总数量、在架数、借出数"""
     conn = get_conn()
@@ -201,7 +218,7 @@ def get_category_stat():
         })
     return result
 
-# ========== 新增：分页查询图书 ==========
+# ========== 分页查询图书 ==========
 def get_books_by_page(page, page_size=5):
     """
     分页浏览图书
@@ -219,6 +236,7 @@ def get_books_by_page(page, page_size=5):
     conn.close()
     return books, total
 
+# ========== 查询用户逾期未还图书 ==========
 def get_my_overdue_books(user_id):
     """
     查询当前用户所有逾期未归还的图书
@@ -254,6 +272,7 @@ def get_my_overdue_books(user_id):
             })
     return overdue_list
 
+# ========== 图书续借 ==========
 def renew_book(user_id, book_id, add_days=7):
     """
     续借图书，在原截止时间基础上延长借阅期限

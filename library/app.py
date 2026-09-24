@@ -28,6 +28,7 @@ def show_menu():
     print("22. 续借图书")
     print("23. 按分类查询图书")
     print("24. 修改登录密码")
+    print("25. 注销登录")
     print("0. 退出程序")
     print("==========================")
 
@@ -90,8 +91,7 @@ def main():
             res = delete_book(bid)
             if res:
                 print("✅已删除")
-            else:
-                print("❌删除失败，图书ID不存在")
+            # 失败原因由函数内部输出，这里不再重复提示
         elif opt == "7":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -288,7 +288,6 @@ def main():
                     print(f"  当前罚款：{item['current_penalty']}元")
                     total_penalty += item['current_penalty']
                 print(f"\n💸当前累计逾期罚款：{round(total_penalty, 2)}元")
-
         # 22 续借图书
         elif opt == "22":
             if not current_user_id:
@@ -309,7 +308,7 @@ def main():
             except ValueError:
                 print("❌输入无效数字！")
         
-        # ========== 新增：23 按分类查询图书 ==========
+        # 23 按分类查询图书
         elif opt == "23":
             category = input("请输入要查询的图书分类：")
             books = query_book_by_category(category)
@@ -320,8 +319,7 @@ def main():
                 for b in books:
                     status = "已借出" if b[4] == 1 else "可借阅"
                     print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 状态：{status}")
-
-        # ========== 新增：24 修改登录密码 ==========
+        # 24 修改登录密码
         elif opt == "24":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -337,7 +335,17 @@ def main():
                 print("✅密码修改成功")
             else:
                 print("❌旧密码错误，修改失败")
-
+        # 25 注销登录
+        elif opt == "25":
+            if not current_user_id:
+                print("⚠当前未登录，无需注销")
+                continue
+            confirm = input("确认注销当前登录账号？(y/n):")
+            if confirm.lower() == "y":
+                current_user_id = None
+                print("✅已注销登录，返回初始状态")
+            else:
+                print("❌取消注销")
         elif opt == "0":
             print("👋程序退出")
             break
