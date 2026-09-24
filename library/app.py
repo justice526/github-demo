@@ -26,6 +26,8 @@ def show_menu():
     print("20. 分页浏览图书")
     print("21. 查看我的逾期图书")
     print("22. 续借图书")
+    print("23. 按分类查询图书")
+    print("24. 修改登录密码")
     print("0. 退出程序")
     print("==========================")
 
@@ -267,7 +269,7 @@ def main():
                         print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 分类：{b[3]} | 状态：{status}")
             except ValueError:
                 print("❌输入无效数字！")
-        # ========== 新增：21 我的逾期图书 ==========
+        # 21 我的逾期图书
         elif opt == "21":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -287,7 +289,7 @@ def main():
                     total_penalty += item['current_penalty']
                 print(f"\n💸当前累计逾期罚款：{round(total_penalty, 2)}元")
 
-        # ========== 新增：22 续借图书 ==========
+        # 22 续借图书
         elif opt == "22":
             if not current_user_id:
                 print("⚠请先登录！")
@@ -306,6 +308,36 @@ def main():
                     print("❌续借失败，未找到该借阅记录")
             except ValueError:
                 print("❌输入无效数字！")
+        
+        # ========== 新增：23 按分类查询图书 ==========
+        elif opt == "23":
+            category = input("请输入要查询的图书分类：")
+            books = query_book_by_category(category)
+            print(f"\n==== 【{category}】分类图书 ====")
+            if not books:
+                print("该分类下暂无图书")
+            else:
+                for b in books:
+                    status = "已借出" if b[4] == 1 else "可借阅"
+                    print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 状态：{status}")
+
+        # ========== 新增：24 修改登录密码 ==========
+        elif opt == "24":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            old_pwd = input("请输入旧密码：")
+            new_pwd = input("请输入新密码：")
+            confirm_pwd = input("请再次确认新密码：")
+            if new_pwd != confirm_pwd:
+                print("❌两次输入的新密码不一致！")
+                continue
+            res = modify_password(current_user_id, old_pwd, new_pwd)
+            if res:
+                print("✅密码修改成功")
+            else:
+                print("❌旧密码错误，修改失败")
+
         elif opt == "0":
             print("👋程序退出")
             break

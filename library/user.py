@@ -70,6 +70,27 @@ def pay_fine(user_id, amount):
     conn.close()
     return True
 
+def modify_password(user_id, old_password, new_password):
+    """
+    修改用户登录密码
+    :param user_id: 当前登录用户ID
+    :param old_password: 旧密码
+    :param new_password: 新密码
+    :return: True修改成功；False旧密码验证失败
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    # 验证旧密码是否正确
+    cur.execute("SELECT id FROM user WHERE id = ? AND password = ?", (user_id, old_password))
+    if not cur.fetchone():
+        conn.close()
+        return False
+    # 更新为新密码
+    cur.execute("UPDATE user SET password = ? WHERE id = ?", (new_password, user_id))
+    conn.commit()
+    conn.close()
+    return True
+
 if __name__ == "__main__":
     # 自测代码
     print("user模块加载完成")
