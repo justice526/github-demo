@@ -137,5 +137,45 @@ def export_borrow_record_to_txt(user_id, save_path="borrow_record.txt"):
         print("导出异常：",e)
         return False
 
+# ========== 新增：用户借阅统计概览 ==========
+def get_user_borrow_stats(user_id):
+    """
+    获取用户借阅统计概览
+    :return: dict 统计数据
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # 总借阅数量
+        cur.execute("SELECT COUNT(*) FROM borrow_record WHERE user_id = ?", (user_id,))
+        total = cur.fetchone()[0]
+        # 已归还数量
+        cur.execute("SELECT COUNT(*) FROM borrow_record WHERE user_id = ? AND return_time IS NOT NULL", (user_id,))
+        returned = cur.fetchone()[0]
+        # 未归还数量
+        unreturned = total - returned
+        # 累计产生罚款总额
+        cur.execute("SELECT SUM(penalty) FROM borrow_record WHERE user_id = ?", (user_id,))
+        total_penalty = cur.fetchone()[0] or 0.0
+        # 逾期未还图书数量
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur.execute('''
+            SELECT COUNT(*) FROM borrow_record
+            WHERE user_id = ? AND return_time IS NULL AND return_deadline < ?
+        ''', (user_id, now_str))
+        overdue_cnt = cur.fetchone()[0]
+        return {
+            "total_borrow": total,
+            "returned": returned,
+            "unreturned": unreturned,
+            "total_penalty": round(total_penalty, 2),
+            "overdue_count": overdue_cnt
+        }
+    except Exception as e:
+        print("获取借阅统计异常：", e)
+        return {}
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     print("borrow模块加载完成")

@@ -29,6 +29,8 @@ def show_menu():
     print("23. 按分类查询图书")
     print("24. 修改登录密码")
     print("25. 注销登录")
+    print("26. 排序浏览图书")
+    print("27. 我的借阅统计")
     print("0. 退出程序")
     print("==========================")
 
@@ -346,6 +348,37 @@ def main():
                 print("✅已注销登录，返回初始状态")
             else:
                 print("❌取消注销")
+        # 26 排序浏览图书
+        elif opt == "26":
+            print("\n可选排序字段：1.ID  2.书名  3.作者  4.分类")
+            field_choice = input("请选择排序字段（直接回车默认ID）：")
+            field_map = {"1": "id", "2": "title", "3": "author", "4": "category"}
+            sort_field = field_map.get(field_choice, "id")
+            order_choice = input("排序方式：1.升序  2.降序（直接回车默认升序）：")
+            sort_order = "desc" if order_choice == "2" else "asc"
+            books = get_books_sorted(sort_field, sort_order)
+            print(f"\n==== 按{sort_field} {sort_order}排序 ====")
+            if not books:
+                print("暂无图书数据")
+            else:
+                for b in books:
+                    status = "已借出" if b[4] == 1 else "可借阅"
+                    print(f"ID:{b[0]} | 书名：{b[1]} | 作者：{b[2]} | 分类：{b[3]} | 状态：{status}")
+        # 27 我的借阅统计
+        elif opt == "27":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            stats = get_user_borrow_stats(current_user_id)
+            print("\n==== 📊我的借阅统计 ====")
+            if not stats:
+                print("暂无借阅数据")
+            else:
+                print(f"累计借阅：{stats['total_borrow']} 本")
+                print(f"已归还：{stats['returned']} 本")
+                print(f"未归还：{stats['unreturned']} 本")
+                print(f"逾期未还：{stats['overdue_count']} 本")
+                print(f"累计产生罚款：{stats['total_penalty']} 元")
         elif opt == "0":
             print("👋程序退出")
             break

@@ -308,5 +308,33 @@ def renew_book(user_id, book_id, add_days=7):
     conn.close()
     return new_deadline_str
 
+# ========== 新增：排序查询图书 ==========
+def get_books_sorted(sort_by="id", order="asc"):
+    """
+    排序查询全部图书
+    :param sort_by: 排序字段 id/title/author/category
+    :param order: 排序方式 asc升序 / desc降序
+    :return: 排序后的图书列表
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    # 字段白名单校验，防止SQL注入
+    allow_fields = ["id", "title", "author", "category"]
+    allow_order = ["asc", "desc"]
+    if sort_by not in allow_fields:
+        sort_by = "id"
+    if order.lower() not in allow_order:
+        order = "asc"
+    try:
+        sql = f"SELECT id,title,author,category,is_borrow FROM book ORDER BY {sort_by} {order}"
+        cur.execute(sql)
+        res = cur.fetchall()
+        return res
+    except Exception as e:
+        print("排序查询异常：", e)
+        return []
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     print("book模块加载完成")
