@@ -1,5 +1,5 @@
 # SQLite数据库文件
-library/*.db
+*.db
 
 # Python字节码缓存
 __pycache__/

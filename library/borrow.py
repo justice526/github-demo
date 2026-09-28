@@ -132,7 +132,7 @@ def export_borrow_record_to_txt(user_id, save_path="borrow_record.txt"):
             for row in records:
                 bid, title, borrow_t, deadline, return_t, penalty = row
                 f.write(f"图书ID:{bid}《{title}》|借阅:{borrow_t} |截止:{deadline} |归还:{return_t} |罚款:{penalty}元\n")
-        return True
+            return True
     except Exception as e:
         print("导出异常：",e)
         return False
@@ -176,6 +176,44 @@ def get_user_borrow_stats(user_id):
         return {}
     finally:
         conn.close()
+
+# ========== 图书续借 ==========
+def renew_book(user_id, book_id, add_days=7):
+    """
+    图书续借：未归还且未逾期的图书可续借，在原截止时间基础上延长 add_days 天
+    :param user_id: 用户ID
+    :param book_id: 图书ID
+    :param add_days: 续借天数，默认7天
+    :return: 成功返回新截止时间字符串，失败返回 False（未找到记录或已逾期）
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    now = datetime.now()
+    # 查询未归还记录
+    cur.execute('''
+        SELECT return_deadline FROM borrow_record
+        WHERE book_id=? AND user_id=? AND return_time IS NULL
+    ''', (book_id, user_id))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False
+    deadline = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+    # 逾期图书不允许续借
+    if now > deadline:
+        conn.close()
+        return False
+    # 续借，截止时间 + add_days 天
+    new_deadline = deadline + timedelta(days=add_days)
+    new_deadline_str = new_deadline.strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute('''
+        UPDATE borrow_record
+        SET return_deadline = ?
+        WHERE book_id=? AND user_id=? AND return_time IS NULL
+    ''', (new_deadline_str, book_id, user_id))
+    conn.commit()
+    conn.close()
+    return new_deadline_str
 
 if __name__ == "__main__":
     print("borrow模块加载完成")

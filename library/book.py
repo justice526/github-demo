@@ -32,11 +32,15 @@ def query_all_book():
     conn.close()
     return data
 
-def update_book(book_id, new_title, new_author):
-    """修改图书信息"""
+def update_book(book_id, new_title, new_author, new_category=None):
+    """修改图书信息，new_category 为 None 时保持原分类不变"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE book SET title=?, author=? WHERE id=?", (new_title, new_author, book_id))
+    if new_category is None:
+        cur.execute("UPDATE book SET title=?, author=? WHERE id=?", (new_title, new_author, book_id))
+    else:
+        cur.execute("UPDATE book SET title=?, author=?, category=? WHERE id=?",
+                    (new_title, new_author, new_category, book_id))
     conn.commit()
     affected = cur.rowcount
     conn.close()
@@ -76,6 +80,15 @@ def search_book(keyword):
     sql = """SELECT id,title,author,category,is_borrow FROM book
              WHERE title LIKE ? OR author LIKE ?"""
     cur.execute(sql, (f"%{keyword}%", f"%{keyword}%"))
+    res = cur.fetchall()
+    conn.close()
+    return res
+
+def query_book_by_category(category):
+    """按分类查询图书"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id,title,author,category,is_borrow FROM book WHERE category = ?", (category,))
     res = cur.fetchall()
     conn.close()
     return res
@@ -271,42 +284,6 @@ def get_my_overdue_books(user_id):
                 "current_penalty": penalty
             })
     return overdue_list
-
-# ========== 图书续借 ==========
-def renew_book(user_id, book_id, add_days=7):
-    """
-    续借图书，在原截止时间基础上延长借阅期限
-    :param user_id: 用户ID
-    :param book_id: 图书ID
-    :param add_days: 续借天数，默认7天
-    :return: 成功返回新截止时间字符串，失败返回False
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-    # 查询该用户这本未归还的借阅记录
-    cur.execute('''
-        SELECT return_deadline FROM borrow_record
-        WHERE user_id = ? AND book_id = ? AND return_time IS NULL
-    ''', (user_id, book_id))
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        return False
-    
-    # 原截止时间基础上增加天数
-    old_deadline = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-    new_deadline = old_deadline + timedelta(days=add_days)
-    new_deadline_str = new_deadline.strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 更新截止时间
-    cur.execute('''
-        UPDATE borrow_record
-        SET return_deadline = ?
-        WHERE user_id = ? AND book_id = ? AND return_time IS NULL
-    ''', (new_deadline_str, user_id, book_id))
-    conn.commit()
-    conn.close()
-    return new_deadline_str
 
 # ========== 新增：排序查询图书 ==========
 def get_books_sorted(sort_by="id", order="asc"):

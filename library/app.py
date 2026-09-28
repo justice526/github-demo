@@ -1,6 +1,7 @@
 from book import *
 from user import *
 from borrow import *
+from db import init_db
 
 def show_menu():
     print("\n=====个人图书管理系统=====")
@@ -31,10 +32,12 @@ def show_menu():
     print("25. 注销登录")
     print("26. 排序浏览图书")
     print("27. 我的借阅统计")
+    print("28. 忘记密码（密保找回）")
+    print("29. 查看全部用户（管理员）")
     print("0. 退出程序")
     print("==========================")
-
 def main():
+    init_db()
     current_user_id = None
     while True:
         show_menu()
@@ -42,7 +45,9 @@ def main():
         if opt == "1":
             username = input("输入注册用户名：")
             pwd = input("输入密码：")
-            if register_user(username, pwd):
+            sq = input("设置密保问题（用于找回密码，可回车跳过）：")
+            sa = input("设置密保答案：")
+            if register_user(username, pwd, sq, sa):
                 print("✅注册成功")
             else:
                 print("❌注册失败，用户名重复")
@@ -80,7 +85,8 @@ def main():
             bid = int(input("要修改的图书ID："))
             new_title = input("新书名：")
             new_author = input("新作者：")
-            res = update_book(bid, new_title, new_author)
+            new_category = input("新分类：")
+            res = update_book(bid, new_title, new_author, new_category)
             if res:
                 print("✅修改完成")
             else:
@@ -306,12 +312,15 @@ def main():
                 if res:
                     print(f"✅续借成功，新的归还截止时间：{res}")
                 else:
-                    print("❌续借失败，未找到该借阅记录")
+                    print("❌续借失败，未找到该借阅记录或已逾期")
             except ValueError:
                 print("❌输入无效数字！")
         
         # 23 按分类查询图书
         elif opt == "23":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
             category = input("请输入要查询的图书分类：")
             books = query_book_by_category(category)
             print(f"\n==== 【{category}】分类图书 ====")
@@ -350,6 +359,9 @@ def main():
                 print("❌取消注销")
         # 26 排序浏览图书
         elif opt == "26":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
             print("\n可选排序字段：1.ID  2.书名  3.作者  4.分类")
             field_choice = input("请选择排序字段（直接回车默认ID）：")
             field_map = {"1": "id", "2": "title", "3": "author", "4": "category"}
@@ -379,11 +391,32 @@ def main():
                 print(f"未归还：{stats['unreturned']} 本")
                 print(f"逾期未还：{stats['overdue_count']} 本")
                 print(f"累计产生罚款：{stats['total_penalty']} 元")
+        elif opt == "28":
+            # 忘记密码：密保找回
+            uname = input("请输入你的用户名：")
+            q = get_security_question(uname)
+            if q is None or not q:
+                print("❌该用户不存在或未设置密保问题")
+                continue
+            print(f"你的密保问题：{q}")
+            ans = input("请输入密保答案：")
+            new_pwd = input("请输入新密码：")
+            if reset_password_by_qa(uname, ans, new_pwd):
+                print("✅密码重置成功，请用新密码登录")
+            else:
+                print("❌密保答案错误，重置失败")
+        elif opt == "29":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            users = get_all_users()
+            print("\n==== 全部用户（管理员） ====")
+            for u in users:
+                print(f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元")
         elif opt == "0":
             print("👋程序退出")
             break
         else:
             print("❌无效输入，请重新选择")
-
 if __name__ == "__main__":
     main()

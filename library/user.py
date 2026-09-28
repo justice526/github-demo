@@ -7,16 +7,17 @@ def get_conn():
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
-def register_user(username, password):
-    """注册用户，用户名唯一，成功返回True，重复返回False"""
+# ========= 用户相关 =========
+def register_user(username, password, security_q="", security_a=""):
+    """注册用户，用户名唯一；成功返回True，重复返回False"""
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO user(username, password, balance) VALUES (?, ?, 0)", (username, password))
+        cur.execute("INSERT INTO user(username, password, balance, security_q, security_a) VALUES (?, ?, 0, ?, ?)",
+                    (username, password, security_q, security_a))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
-        # 用户名唯一冲突
         return False
     finally:
         conn.close()
@@ -26,12 +27,9 @@ def login_user(username, password):
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id FROM user WHERE username=? AND password=?", (username, password))
-    row = cur.fetchone()
+    res = cur.fetchone()
     conn.close()
-    if row:
-        return row[0]
-    else:
-        return None
+    return res[0] if res else None
 
 def get_balance(user_id):
     """查询用户余额"""
@@ -40,9 +38,7 @@ def get_balance(user_id):
     cur.execute("SELECT balance FROM user WHERE id=?", (user_id,))
     res = cur.fetchone()
     conn.close()
-    if res:
-        return round(res[0], 2)
-    return 0.0
+    return round(res[0], 2) if res else 0.0
 
 def recharge_balance(user_id, money):
     """余额充值，money>0才生效"""
@@ -55,42 +51,64 @@ def recharge_balance(user_id, money):
     conn.close()
     return True
 
-def pay_fine(user_id, amount):
-    """缴纳罚款：余额扣钱"""
+def modify_password(user_id, old_pwd, new_pwd):
+    """修改登录密码"""
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT balance FROM user WHERE id=?", (user_id,))
-    bal = cur.fetchone()[0]
-    if bal < amount:
+    cur.execute("SELECT id FROM user WHERE id=? AND password=?", (user_id, old_pwd))
+    if not cur.fetchone():
         conn.close()
         return False
-    # 扣除余额
-    cur.execute("UPDATE user SET balance = balance - ? WHERE id=?", (amount, user_id))
+    cur.execute("UPDATE user SET password=? WHERE id=?", (new_pwd, user_id))
     conn.commit()
     conn.close()
     return True
 
-def modify_password(user_id, old_password, new_password):
-    """
-    修改用户登录密码
-    :param user_id: 当前登录用户ID
-    :param old_password: 旧密码
-    :param new_password: 新密码
-    :return: True修改成功；False旧密码验证失败
-    """
+# ===== 忘记密码：获取密保问题 =====
+def get_security_question(username):
     conn = get_conn()
     cur = conn.cursor()
-    # 验证旧密码是否正确
-    cur.execute("SELECT id FROM user WHERE id = ? AND password = ?", (user_id, old_password))
+    cur.execute("SELECT security_q FROM user WHERE username=?", (username,))
+    res = cur.fetchone()
+    conn.close()
+    return res[0] if res else None
+
+# ===== 忘记密码：验证密保答案，重置密码 =====
+def reset_password_by_qa(username, security_ans, new_pwd):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM user WHERE username=? AND security_a=?", (username, security_ans))
     if not cur.fetchone():
         conn.close()
         return False
-    # 更新为新密码
-    cur.execute("UPDATE user SET password = ? WHERE id = ?", (new_password, user_id))
+    cur.execute("UPDATE user SET password=? WHERE username=?", (new_pwd, username))
+    conn.commit()
+    conn.close()
+    return True
+
+# ===== 管理员：查询全部用户 =====
+def get_all_users():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id, username, balance FROM user")
+    data = cur.fetchall()
+    conn.close()
+    return data
+
+# ===== 罚款相关 =====
+def pay_fine(user_id, amount):
+    """缴纳罚款：余额扣钱，并结清该用户所有未缴罚款"""
+    conn = get_conn()
+    cur = conn.cursor()
+    if get_balance(user_id) < amount:
+        conn.close()
+        return False
+    cur.execute("UPDATE user SET balance = balance - ? WHERE id=?", (amount, user_id))
+    # 结清该用户所有未缴罚款（penalty > 0 的记录）
+    cur.execute("UPDATE borrow_record SET penalty=0 WHERE user_id=? AND penalty > 0", (user_id,))
     conn.commit()
     conn.close()
     return True
 
 if __name__ == "__main__":
-    # 自测代码
     print("user模块加载完成")
