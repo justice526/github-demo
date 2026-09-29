@@ -10,7 +10,7 @@
 - 余额充值、查询余额
 - 修改登录密码
 - 忘记密码（密保找回）
-- 管理员查看全部用户
+- 管理员查看全部用户（含权限校验，仅管理员可用）
 
 ### 图书模块
 - 添加 / 修改（含分类）/ 删除图书
@@ -69,15 +69,17 @@ python app.py
 # 或直接启动图形界面版
 python gui.py
 
-# 首次初始化数据库并导入预置测试图书（可选）
+# 首次初始化数据库、导入预置图书并创建默认管理员（可选）
 python db.py
 ```
 
-首次运行会自动创建 `library.db` 并建表。如需示例图书数据，运行 `python db.py` 会导入 15 本预置图书。
+首次运行会自动创建 `library.db` 并建表。运行 `python db.py` 会导入 **34 本预置图书**（覆盖 9 个分类），并创建默认管理员账号。
+
+**默认管理员**：用户名 `admin`，密码 `admin123`（余额 100 元，拥有管理权限）。
 
 ## 数据库结构
 
-- **user**：`id, username, password, balance, security_q, security_a`
+- **user**：`id, username, password, balance, security_q, security_a, is_admin`
 - **book**：`id, title, author, category, is_borrow`
 - **borrow_record**：`id, user_id, book_id, borrow_time, return_deadline, return_time, penalty`
 
@@ -102,3 +104,5 @@ python db.py
 - 借阅规则：每本书借期 7 天，逾期后每天 0.5 元罚款。
 - 罚款缴纳：在「个人中心」一键缴纳，自动从余额扣除并结清。
 - 删除图书前会校验是否存在未归还借阅，避免误删。
+- 默认管理员：`admin / admin123`（由 `python db.py` 创建）。
+- 输入健壮性：命令行对所有数字输入做了校验，非法输入不会导致程序崩溃。

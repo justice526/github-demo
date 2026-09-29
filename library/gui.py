@@ -5,41 +5,100 @@ from user import *
 from borrow import *
 from db import init_db
 
+# ===== 浅色主题配色 =====
+BG = "#eef1f6"          # 主背景
+PANEL = "#ffffff"       # 面板/标题栏
+ACCENT = "#3d6cf5"      # 主题蓝
+ACCENT_DK = "#2f56cc"   # 主题蓝（按下）
+TEXT = "#2c3e50"        # 主文字
+MUTED = "#7f8c8d"       # 次要文字
+LINE = "#dfe4ec"        # 分隔线
+DANGER = "#e74c3c"      # 危险红
+SUCCESS = "#27ae60"     # 成功绿
+FONT = "微软雅黑"
+
 
 class LibraryApp:
     def __init__(self, root):
         self.root = root
         self.root.title("个人图书管理系统")
-        self.root.geometry("1000x680")
+        self.root.geometry("1100x740")
+        self.root.minsize(980, 660)
+        self.root.configure(bg=BG)
         self.current_user_id = None
-        # 分页浏览图书的状态
-        self.page = 1
+        self.page = 1          # 分页浏览状态
+        self._setup_style()
         self.show_login()
+
+    # ================= 通用样式 =================
+    def _setup_style(self):
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("Treeview", font=(FONT, 10), rowheight=26,
+                        background=PANEL, fieldbackground=PANEL, foreground=TEXT)
+        style.configure("Treeview.Heading", font=(FONT, 10, "bold"), background="#e6eaf2")
+        style.map("Treeview", background=[("selected", "#d6e0ff")], foreground=[("selected", TEXT)])
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", font=(FONT, 10), padding=[16, 8])
+        style.configure("TCombobox", font=(FONT, 9))
+
+    def _btn(self, parent, text, command, primary=False, width=None, bg=None, fg=None):
+        """统一样式的按钮"""
+        if primary:
+            b = tk.Button(parent, text=text, command=command, bg=ACCENT, fg="white",
+                          activebackground=ACCENT_DK, activeforeground="white",
+                          relief="flat", cursor="hand2", font=(FONT, 9), padx=12, pady=3)
+        elif bg:
+            b = tk.Button(parent, text=text, command=command, bg=bg, fg=fg or "white",
+                          activebackground=bg, activeforeground=fg or "white",
+                          relief="flat", cursor="hand2", font=(FONT, 9), padx=12, pady=3)
+        else:
+            b = tk.Button(parent, text=text, command=command, bg="#e8ecf3", fg=TEXT,
+                          activebackground="#d6dde8", relief="flat", cursor="hand2",
+                          font=(FONT, 9), padx=12, pady=3)
+        if width:
+            b.config(width=width)
+        return b
+
+    def _label(self, parent, text, size=10, bold=False, fg=TEXT, bg=BG, **kw):
+        f = (FONT, size, "bold") if bold else (FONT, size)
+        return tk.Label(parent, text=text, font=f, fg=fg, bg=bg, **kw)
 
     # ========== 登录窗口 ==========
     def show_login(self):
         self.login_win = tk.Toplevel(self.root)
         self.login_win.title("用户登录")
-        self.login_win.geometry("340x260")
+        self.login_win.configure(bg=PANEL)
         self.login_win.resizable(False, False)
 
-        tk.Label(self.login_win, text="图书管理系统", font=("微软雅黑", 16)).pack(pady=20)
+        w, h = 360, 320
+        self.login_win.update_idletasks()
+        x = (self.login_win.winfo_screenwidth() - w) // 2
+        y = (self.login_win.winfo_screenheight() - h) // 2
+        self.login_win.geometry(f"{w}x{h}+{x}+{y}")
 
-        frame = tk.Frame(self.login_win)
-        frame.pack(pady=5)
-        tk.Label(frame, text="用户名：", width=8).grid(row=0, column=0, pady=5)
-        self.entry_user = tk.Entry(frame, width=18)
-        self.entry_user.grid(row=0, column=1)
+        self._label(self.login_win, "📚 图书管理系统", size=16, bold=True, fg=ACCENT, bg=PANEL).pack(pady=(28, 6))
+        self._label(self.login_win, "Personal Library System", size=8, fg=MUTED, bg=PANEL).pack()
 
-        tk.Label(frame, text="密  码：", width=8).grid(row=1, column=0, pady=5)
-        self.entry_pwd = tk.Entry(frame, width=18, show="*")
-        self.entry_pwd.grid(row=1, column=1)
+        frame = tk.Frame(self.login_win, bg=PANEL)
+        frame.pack(pady=18)
+        self._label(frame, "用户名：", bg=PANEL).grid(row=0, column=0, pady=6, sticky="e")
+        self.entry_user = tk.Entry(frame, width=20, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_user.grid(row=0, column=1, pady=6)
+        self._label(frame, "密  码：", bg=PANEL).grid(row=1, column=0, pady=6, sticky="e")
+        self.entry_pwd = tk.Entry(frame, width=20, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_pwd.grid(row=1, column=1, pady=6)
+        self.login_win.bind("<Return>", lambda e: self.do_login())
 
-        btn_frame = tk.Frame(self.login_win)
-        btn_frame.pack(pady=12)
-        tk.Button(btn_frame, text="登录", width=8, command=self.do_login).grid(row=0, column=0, padx=8)
-        tk.Button(btn_frame, text="注册", width=8, command=self.do_register).grid(row=0, column=1, padx=8)
-        tk.Button(self.login_win, text="忘记密码", width=20, command=self.forget_password).pack(pady=3)
+        btn_frame = tk.Frame(self.login_win, bg=PANEL)
+        btn_frame.pack(pady=8)
+        self._btn(btn_frame, "登 录", self.do_login, primary=True, width=10).grid(row=0, column=0, padx=6)
+        self._btn(btn_frame, "注 册", self.do_register, width=10).grid(row=0, column=1, padx=6)
+        self._btn(self.login_win, "忘记密码", self.forget_password, width=24).pack(pady=4)
+        self._label(self.login_win, "默认管理员：admin / admin123", size=8, fg=MUTED, bg=PANEL).pack(pady=(10, 0))
 
     def do_login(self):
         username = self.entry_user.get().strip()
@@ -50,7 +109,8 @@ class LibraryApp:
         uid = login_user(username, pwd)
         if uid:
             self.current_user_id = uid
-            messagebox.showinfo("成功", f"登录成功！\n当前余额：{get_balance(uid)} 元")
+            role = "（管理员）" if is_admin(uid) else ""
+            messagebox.showinfo("成功", f"登录成功{role}！\n当前余额：{get_balance(uid)} 元")
             self.login_win.destroy()
             self.init_main_ui()
         else:
@@ -94,99 +154,85 @@ class LibraryApp:
 
     # ========== 主界面初始化 ==========
     def init_main_ui(self):
-        top_bar = tk.Frame(self.root, bg="#f0f0f0", height=40)
-        top_bar.pack(fill="x", side="top")
-        self.user_label = tk.Label(top_bar, text=f"当前用户：ID {self.current_user_id}  |  余额：{get_balance(self.current_user_id)} 元",
-                                   bg="#f0f0f0", font=("微软雅黑", 10))
-        self.user_label.pack(side="right", padx=20)
+        # 顶部标题栏
+        header = tk.Frame(self.root, bg=PANEL)
+        header.pack(fill="x", side="top")
+        self._label(header, "📚 个人图书管理系统", size=15, bold=True, fg=ACCENT, bg=PANEL).pack(side="left", padx=18, pady=12)
+        self.user_label = self._label(header, "", bg=PANEL)
+        self.user_label.pack(side="right", padx=18)
+        tk.Frame(self.root, bg=ACCENT, height=2).pack(fill="x")
 
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=12)
 
-        self.tab_book = tk.Frame(self.notebook)
-        self.tab_borrow = tk.Frame(self.notebook)
-        self.tab_personal = tk.Frame(self.notebook)
-        self.tab_stats = tk.Frame(self.notebook)
+        self.tab_book = tk.Frame(self.notebook, bg=BG)
+        self.tab_borrow = tk.Frame(self.notebook, bg=BG)
+        self.tab_personal = tk.Frame(self.notebook, bg=BG)
+        self.tab_stats = tk.Frame(self.notebook, bg=BG)
 
-        self.notebook.add(self.tab_book, text="图书管理")
-        self.notebook.add(self.tab_borrow, text="借阅管理")
-        self.notebook.add(self.tab_personal, text="个人中心")
-        self.notebook.add(self.tab_stats, text="统计报表")
+        self.notebook.add(self.tab_book, text="  图书管理  ")
+        self.notebook.add(self.tab_borrow, text="  借阅管理  ")
+        self.notebook.add(self.tab_personal, text="  个人中心  ")
+        self.notebook.add(self.tab_stats, text="  统计报表  ")
 
         self.init_book_tab()
         self.init_borrow_tab()
         self.init_personal_tab()
         self.init_stats_tab()
+        self.update_user_info()
+
+    def update_user_info(self):
+        bal = get_balance(self.current_user_id)
+        role = "  |  👑 管理员" if is_admin(self.current_user_id) else ""
+        self.user_label.config(text=f"当前用户：ID {self.current_user_id}  |  余额：{bal} 元{role}")
 
     # ========== 1. 图书管理标签页 ==========
     def init_book_tab(self):
-        left = tk.Frame(self.tab_book, padx=10, pady=10)
+        left = tk.Frame(self.tab_book, bg=BG, padx=10, pady=10)
         left.pack(side="left", fill="y")
 
-        tk.Label(left, text="图书ID：").grid(row=0, column=0, sticky="e", pady=4)
-        self.entry_bid = tk.Entry(left, width=18)
-        self.entry_bid.grid(row=0, column=1, pady=4)
+        fields = [("图书ID：", "entry_bid"), ("书名：", "entry_title"),
+                  ("作者：", "entry_author"), ("分类：", "entry_category"),
+                  ("搜索关键词：", "entry_search"), ("分类筛选：", "entry_cat_filter")]
+        for i, (text, attr) in enumerate(fields):
+            self._label(left, text).grid(row=i, column=0, sticky="e", pady=4)
+            e = tk.Entry(left, width=18, font=(FONT, 10), relief="solid", bd=1)
+            e.grid(row=i, column=1, pady=4)
+            setattr(self, attr, e)
 
-        tk.Label(left, text="书名：").grid(row=1, column=0, sticky="e", pady=4)
-        self.entry_title = tk.Entry(left, width=18)
-        self.entry_title.grid(row=1, column=1, pady=4)
-
-        tk.Label(left, text="作者：").grid(row=2, column=0, sticky="e", pady=4)
-        self.entry_author = tk.Entry(left, width=18)
-        self.entry_author.grid(row=2, column=1, pady=4)
-
-        tk.Label(left, text="分类：").grid(row=3, column=0, sticky="e", pady=4)
-        self.entry_category = tk.Entry(left, width=18)
-        self.entry_category.grid(row=3, column=1, pady=4)
-
-        tk.Label(left, text="搜索关键词：").grid(row=4, column=0, sticky="e", pady=4)
-        self.entry_search = tk.Entry(left, width=18)
-        self.entry_search.grid(row=4, column=1, pady=4)
-
-        tk.Label(left, text="分类筛选：").grid(row=5, column=0, sticky="e", pady=4)
-        self.entry_cat_filter = tk.Entry(left, width=18)
-        self.entry_cat_filter.grid(row=5, column=1, pady=4)
-
-        btn_group = tk.Frame(left)
+        btn_group = tk.Frame(left, bg=BG)
         btn_group.grid(row=6, column=0, columnspan=2, pady=8)
-        tk.Button(btn_group, text="添加图书", width=14, command=self.add_book_gui).grid(row=0, column=0, pady=3)
-        tk.Button(btn_group, text="修改图书", width=14, command=self.update_book_gui).grid(row=1, column=0, pady=3)
-        tk.Button(btn_group, text="删除图书", width=14, command=self.delete_book_gui).grid(row=2, column=0, pady=3)
-        tk.Button(btn_group, text="关键词搜索", width=14, command=self.search_book_gui).grid(row=3, column=0, pady=3)
-        tk.Button(btn_group, text="按分类筛选", width=14, command=self.filter_by_category_gui).grid(row=4, column=0, pady=3)
-        tk.Button(btn_group, text="批量导入图书", width=14, command=self.batch_import_book_gui).grid(row=5, column=0, pady=3)
-        tk.Button(btn_group, text="恢复备份", width=14, command=self.restore_backup_gui).grid(row=6, column=0, pady=3)
-        tk.Button(btn_group, text="刷新全部", width=14, command=self.refresh_book_list).grid(row=7, column=0, pady=3)
+        actions = [("添加图书", self.add_book_gui, True), ("修改图书", self.update_book_gui, False),
+                   ("删除图书", self.delete_book_gui, False), ("关键词搜索", self.search_book_gui, False),
+                   ("按分类筛选", self.filter_by_category_gui, False), ("批量导入图书", self.batch_import_book_gui, False),
+                   ("恢复备份", self.restore_backup_gui, False), ("刷新全部", self.refresh_book_list, False)]
+        for i, (text, cmd, primary) in enumerate(actions):
+            self._btn(btn_group, text, cmd, primary=primary, width=14).grid(row=i, column=0, pady=3)
 
         # 排序区
-        sort_frame = tk.LabelFrame(left, text="排序浏览", padx=6, pady=6)
-        sort_frame.grid(row=7, column=0, columnspan=2, pady=6, sticky="w")
-        tk.Label(sort_frame, text="字段：").grid(row=0, column=0)
+        sort_frame = tk.LabelFrame(left, text=" 排序浏览 ", padx=8, pady=8, bg=BG, fg=TEXT, font=(FONT, 9))
+        sort_frame.grid(row=7, column=0, columnspan=2, pady=6, sticky="we")
+        self._label(sort_frame, "字段：").grid(row=0, column=0)
         self.sort_field = ttk.Combobox(sort_frame, values=["ID", "书名", "作者", "分类"], width=8, state="readonly")
         self.sort_field.set("ID")
         self.sort_field.grid(row=0, column=1, padx=3)
-        tk.Label(sort_frame, text="方式：").grid(row=0, column=2)
+        self._label(sort_frame, "方式：").grid(row=0, column=2)
         self.sort_order = ttk.Combobox(sort_frame, values=["升序", "降序"], width=6, state="readonly")
         self.sort_order.set("升序")
         self.sort_order.grid(row=0, column=3, padx=3)
-        tk.Button(sort_frame, text="排序", width=6, command=self.sort_books_gui).grid(row=0, column=4, padx=3)
+        self._btn(sort_frame, "排序", self.sort_books_gui, width=6).grid(row=0, column=4, padx=3)
 
         # 右侧图书列表
-        right = tk.Frame(self.tab_book)
+        right = tk.Frame(self.tab_book, bg=BG)
         right.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
         columns = ("id", "title", "author", "category", "status")
         self.book_tree = ttk.Treeview(right, columns=columns, show="headings")
-        self.book_tree.heading("id", text="ID")
-        self.book_tree.heading("title", text="书名")
-        self.book_tree.heading("author", text="作者")
-        self.book_tree.heading("category", text="分类")
-        self.book_tree.heading("status", text="状态")
-        self.book_tree.column("id", width=50, anchor="center")
-        self.book_tree.column("title", width=180)
-        self.book_tree.column("author", width=100)
-        self.book_tree.column("category", width=100)
-        self.book_tree.column("status", width=80, anchor="center")
+        for col, txt, w, anchor in [("id", "ID", 60, "center"), ("title", "书名", 200, None),
+                                    ("author", "作者", 120, None), ("category", "分类", 110, None),
+                                    ("status", "状态", 90, "center")]:
+            self.book_tree.heading(col, text=txt)
+            self.book_tree.column(col, width=w, anchor=anchor or "w")
 
         scroll = ttk.Scrollbar(right, orient="vertical", command=self.book_tree.yview)
         self.book_tree.configure(yscrollcommand=scroll.set)
@@ -194,16 +240,16 @@ class LibraryApp:
         scroll.pack(side="right", fill="y")
 
         # 分页栏
-        page_bar = tk.Frame(right)
-        page_bar.pack(side="bottom", fill="x", pady=5)
-        tk.Label(page_bar, text="每页").pack(side="left")
-        self.entry_page_size = tk.Entry(page_bar, width=4)
+        page_bar = tk.Frame(right, bg=BG)
+        page_bar.pack(side="bottom", fill="x", pady=6)
+        self._label(page_bar, "每页").pack(side="left")
+        self.entry_page_size = tk.Entry(page_bar, width=4, font=(FONT, 10), relief="solid", bd=1)
         self.entry_page_size.insert(0, "5")
         self.entry_page_size.pack(side="left", padx=3)
-        tk.Label(page_bar, text="本").pack(side="left")
-        tk.Button(page_bar, text="上一页", command=self.prev_page).pack(side="left", padx=5)
-        tk.Button(page_bar, text="下一页", command=self.next_page).pack(side="left", padx=5)
-        self.page_label = tk.Label(page_bar, text="")
+        self._label(page_bar, "本").pack(side="left")
+        self._btn(page_bar, "上一页", self.prev_page).pack(side="left", padx=5)
+        self._btn(page_bar, "下一页", self.next_page).pack(side="left", padx=5)
+        self.page_label = self._label(page_bar, "")
         self.page_label.pack(side="right", padx=10)
 
         self.book_tree.bind("<<TreeviewSelect>>", self.on_book_select)
@@ -261,14 +307,10 @@ class LibraryApp:
         selected = self.book_tree.selection()
         if selected:
             item = self.book_tree.item(selected[0])["values"]
-            self.entry_bid.delete(0, tk.END)
-            self.entry_bid.insert(0, item[0])
-            self.entry_title.delete(0, tk.END)
-            self.entry_title.insert(0, item[1])
-            self.entry_author.delete(0, tk.END)
-            self.entry_author.insert(0, item[2])
-            self.entry_category.delete(0, tk.END)
-            self.entry_category.insert(0, item[3])
+            for entry, val in [(self.entry_bid, item[0]), (self.entry_title, item[1]),
+                               (self.entry_author, item[2]), (self.entry_category, item[3])]:
+                entry.delete(0, tk.END)
+                entry.insert(0, val)
 
     def add_book_gui(self):
         title = self.entry_title.get().strip()
@@ -292,7 +334,12 @@ class LibraryApp:
         if not bid or not title:
             messagebox.showwarning("提示", "请选择图书并填写书名")
             return
-        if update_book(int(bid), title, author, category):
+        try:
+            bid = int(bid)
+        except ValueError:
+            messagebox.showerror("错误", "图书ID必须是数字")
+            return
+        if update_book(bid, title, author, category):
             messagebox.showinfo("成功", "修改成功")
             self.refresh_book_list()
         else:
@@ -303,9 +350,14 @@ class LibraryApp:
         if not bid:
             messagebox.showwarning("提示", "请选择要删除的图书")
             return
+        try:
+            bid = int(bid)
+        except ValueError:
+            messagebox.showerror("错误", "图书ID必须是数字")
+            return
         if not messagebox.askyesno("确认", "确定删除该图书？"):
             return
-        if delete_book(int(bid)):
+        if delete_book(bid):
             messagebox.showinfo("成功", "删除成功")
             self.clear_book_entry()
             self.refresh_book_list()
@@ -354,44 +406,35 @@ class LibraryApp:
             messagebox.showerror("错误", "恢复失败")
 
     def clear_book_entry(self):
-        self.entry_bid.delete(0, tk.END)
-        self.entry_title.delete(0, tk.END)
-        self.entry_author.delete(0, tk.END)
-        self.entry_category.delete(0, tk.END)
+        for e in (self.entry_bid, self.entry_title, self.entry_author, self.entry_category):
+            e.delete(0, tk.END)
 
     # ========== 2. 借阅管理标签页 ==========
     def init_borrow_tab(self):
-        top = tk.Frame(self.tab_borrow, padx=10, pady=10)
+        top = tk.Frame(self.tab_borrow, bg=BG, padx=10, pady=10)
         top.pack(fill="x")
 
-        tk.Label(top, text="图书ID：").grid(row=0, column=0, padx=5)
-        self.entry_br_bid = tk.Entry(top, width=12)
+        self._label(top, "图书ID：").grid(row=0, column=0, padx=5)
+        self.entry_br_bid = tk.Entry(top, width=12, font=(FONT, 10), relief="solid", bd=1)
         self.entry_br_bid.grid(row=0, column=1, padx=5)
-        tk.Button(top, text="借阅图书", command=self.borrow_book_gui).grid(row=0, column=2, padx=8)
-        tk.Button(top, text="归还图书", command=self.return_book_gui).grid(row=0, column=3, padx=8)
+        self._btn(top, "借阅图书", self.borrow_book_gui, primary=True).grid(row=0, column=2, padx=8)
+        self._btn(top, "归还图书", self.return_book_gui).grid(row=0, column=3, padx=8)
 
-        tk.Label(top, text="续借天数：").grid(row=0, column=4, padx=5)
-        self.entry_renew_days = tk.Entry(top, width=8)
+        self._label(top, "续借天数：").grid(row=0, column=4, padx=5)
+        self.entry_renew_days = tk.Entry(top, width=8, font=(FONT, 10), relief="solid", bd=1)
         self.entry_renew_days.insert(0, "7")
         self.entry_renew_days.grid(row=0, column=5, padx=5)
-        tk.Button(top, text="续借", command=self.renew_book_gui).grid(row=0, column=6, padx=8)
-        tk.Button(top, text="查看逾期图书", command=self.show_overdue_gui).grid(row=0, column=7, padx=8)
-        tk.Button(top, text="刷新我的借阅", command=self.refresh_my_borrow).grid(row=0, column=8, padx=8)
+        self._btn(top, "续借", self.renew_book_gui).grid(row=0, column=6, padx=8)
+        self._btn(top, "查看逾期图书", self.show_overdue_gui).grid(row=0, column=7, padx=8)
+        self._btn(top, "刷新我的借阅", self.refresh_my_borrow).grid(row=0, column=8, padx=8)
 
         columns = ("id", "title", "borrow_time", "deadline", "return_time", "penalty")
         self.borrow_tree = ttk.Treeview(self.tab_borrow, columns=columns, show="headings")
-        self.borrow_tree.heading("id", text="记录ID")
-        self.borrow_tree.heading("title", text="书名")
-        self.borrow_tree.heading("borrow_time", text="借阅时间")
-        self.borrow_tree.heading("deadline", text="截止时间")
-        self.borrow_tree.heading("return_time", text="归还时间")
-        self.borrow_tree.heading("penalty", text="罚款(元)")
-        self.borrow_tree.column("id", width=70, anchor="center")
-        self.borrow_tree.column("title", width=150)
-        self.borrow_tree.column("borrow_time", width=140)
-        self.borrow_tree.column("deadline", width=140)
-        self.borrow_tree.column("return_time", width=140)
-        self.borrow_tree.column("penalty", width=80, anchor="center")
+        for col, txt, w, anchor in [("id", "记录ID", 70, "center"), ("title", "书名", 160, None),
+                                    ("borrow_time", "借阅时间", 150, "center"), ("deadline", "截止时间", 150, "center"),
+                                    ("return_time", "归还时间", 150, "center"), ("penalty", "罚款(元)", 90, "center")]:
+            self.borrow_tree.heading(col, text=txt)
+            self.borrow_tree.column(col, width=w, anchor=anchor or "w")
 
         scroll = ttk.Scrollbar(self.tab_borrow, orient="vertical", command=self.borrow_tree.yview)
         self.borrow_tree.configure(yscrollcommand=scroll.set)
@@ -407,12 +450,21 @@ class LibraryApp:
         for r in records:
             self.borrow_tree.insert("", "end", values=(r[0], r[1], r[2], r[3], r[4] if r[4] else "未归还", r[5]))
 
-    def borrow_book_gui(self):
-        bid = self.entry_br_bid.get().strip()
-        if not bid:
+    def _parse_bid(self, raw):
+        if not raw:
             messagebox.showwarning("提示", "请输入图书ID")
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            messagebox.showerror("错误", "图书ID必须是数字")
+            return None
+
+    def borrow_book_gui(self):
+        bid = self._parse_bid(self.entry_br_bid.get().strip())
+        if bid is None:
             return
-        if borrow_book(self.current_user_id, int(bid)):
+        if borrow_book(self.current_user_id, bid):
             messagebox.showinfo("成功", "借阅成功，借阅期限7天")
             self.refresh_my_borrow()
             self.refresh_book_list()
@@ -420,35 +472,34 @@ class LibraryApp:
             messagebox.showerror("错误", "借阅失败，图书不存在或已借出")
 
     def return_book_gui(self):
-        bid = self.entry_br_bid.get().strip()
-        if not bid:
-            messagebox.showwarning("提示", "请输入图书ID")
+        bid = self._parse_bid(self.entry_br_bid.get().strip())
+        if bid is None:
             return
-        res = return_book(self.current_user_id, int(bid))
+        res = return_book(self.current_user_id, bid)
         if res is not False:
             messagebox.showinfo("成功", f"归还成功\n产生罚款：{res} 元")
             self.refresh_my_borrow()
             self.refresh_book_list()
-            self.update_balance_label()
+            self.update_user_info()
         else:
             messagebox.showerror("错误", "归还失败，无对应借阅记录")
 
     def renew_book_gui(self):
-        bid = self.entry_br_bid.get().strip()
-        days = self.entry_renew_days.get().strip()
-        if not bid or not days:
-            messagebox.showwarning("提示", "请输入图书ID和续借天数")
+        bid = self._parse_bid(self.entry_br_bid.get().strip())
+        if bid is None:
             return
+        days = self.entry_renew_days.get().strip()
         try:
-            days = int(days)
-            res = renew_book(self.current_user_id, int(bid), days)
-            if res:
-                messagebox.showinfo("成功", f"续借成功\n新截止时间：{res}")
-                self.refresh_my_borrow()
-            else:
-                messagebox.showerror("错误", "续借失败（未找到借阅记录或已逾期）")
+            days = int(days) if days else 7
         except ValueError:
-            messagebox.showerror("错误", "天数必须是整数")
+            messagebox.showerror("错误", "续借天数必须是整数")
+            return
+        res = renew_book(self.current_user_id, bid, days)
+        if res:
+            messagebox.showinfo("成功", f"续借成功\n新截止时间：{res}")
+            self.refresh_my_borrow()
+        else:
+            messagebox.showerror("错误", "续借失败（未找到借阅记录或已逾期）")
 
     def show_overdue_gui(self):
         overdue = get_my_overdue_books(self.current_user_id)
@@ -465,56 +516,61 @@ class LibraryApp:
 
     # ========== 3. 个人中心标签页 ==========
     def init_personal_tab(self):
-        frame = tk.Frame(self.tab_personal, padx=20, pady=20)
-        frame.pack()
+        frame = tk.Frame(self.tab_personal, bg=BG, padx=24, pady=20)
+        frame.pack(fill="both", expand=True)
 
-        tk.Label(frame, text="余额充值", font=("微软雅黑", 12, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=10)
-        tk.Label(frame, text="充值金额：").grid(row=1, column=0, pady=5)
-        self.entry_recharge = tk.Entry(frame, width=18)
-        self.entry_recharge.grid(row=1, column=1, pady=5)
-        tk.Button(frame, text="确认充值", command=self.recharge_gui).grid(row=1, column=2, padx=10)
+        def section(r, text):
+            self._label(frame, text, size=12, bold=True, fg=ACCENT).grid(row=r, column=0, columnspan=3, sticky="w", pady=(16, 6))
 
-        tk.Label(frame, text="修改密码", font=("微软雅黑", 12, "bold")).grid(row=2, column=0, columnspan=2, sticky="w", pady=15)
-        tk.Label(frame, text="旧密码：").grid(row=3, column=0, pady=5)
-        self.entry_old_pwd = tk.Entry(frame, width=18, show="*")
-        self.entry_old_pwd.grid(row=3, column=1, pady=5)
-        tk.Label(frame, text="新密码：").grid(row=4, column=0, pady=5)
-        self.entry_new_pwd = tk.Entry(frame, width=18, show="*")
-        self.entry_new_pwd.grid(row=4, column=1, pady=5)
-        tk.Button(frame, text="确认修改", command=self.modify_pwd_gui).grid(row=4, column=2, padx=10)
+        # 余额充值
+        section(0, "💰 余额充值")
+        self._label(frame, "充值金额：").grid(row=1, column=0, pady=5, sticky="e")
+        self.entry_recharge = tk.Entry(frame, width=18, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_recharge.grid(row=1, column=1, pady=5, sticky="w")
+        self._btn(frame, "确认充值", self.recharge_gui, primary=True).grid(row=1, column=2, padx=10, sticky="w")
 
-        tk.Label(frame, text="缴纳罚款", font=("微软雅黑", 12, "bold")).grid(row=5, column=0, columnspan=2, sticky="w", pady=15)
-        self.penalty_label = tk.Label(frame, text=f"待缴罚款：{get_user_total_penalty(self.current_user_id)} 元")
+        # 修改密码
+        section(2, "🔑 修改密码")
+        self._label(frame, "旧密码：").grid(row=3, column=0, pady=5, sticky="e")
+        self.entry_old_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_old_pwd.grid(row=3, column=1, pady=5, sticky="w")
+        self._label(frame, "新密码：").grid(row=4, column=0, pady=5, sticky="e")
+        self.entry_new_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_new_pwd.grid(row=4, column=1, pady=5, sticky="w")
+        self._btn(frame, "确认修改", self.modify_pwd_gui).grid(row=4, column=2, padx=10, sticky="w")
+
+        # 缴纳罚款
+        section(5, "💸 缴纳罚款")
+        self.penalty_label = self._label(frame, f"待缴罚款：{get_user_total_penalty(self.current_user_id)} 元", fg=DANGER)
         self.penalty_label.grid(row=6, column=0, columnspan=2, sticky="w", pady=5)
-        tk.Button(frame, text="一键缴纳全部罚款", command=self.pay_fine_gui).grid(row=6, column=2, padx=10)
+        self._btn(frame, "一键缴纳全部罚款", self.pay_fine_gui, bg=SUCCESS).grid(row=6, column=2, padx=10, sticky="w")
 
-        tk.Label(frame, text="数据导出", font=("微软雅黑", 12, "bold")).grid(row=7, column=0, columnspan=2, sticky="w", pady=15)
-        tk.Button(frame, text="导出借阅记录到TXT", command=self.export_record_gui).grid(row=8, column=0, padx=5)
-        tk.Button(frame, text="备份图书数据JSON", command=self.backup_book_gui).grid(row=8, column=1, padx=5)
+        # 数据导出
+        section(7, "📤 数据导出")
+        self._btn(frame, "导出借阅记录到TXT", self.export_record_gui).grid(row=8, column=0, padx=5, pady=5)
+        self._btn(frame, "备份图书数据JSON", self.backup_book_gui).grid(row=8, column=1, padx=5, pady=5)
 
-        tk.Label(frame, text="管理员功能", font=("微软雅黑", 12, "bold")).grid(row=9, column=0, columnspan=2, sticky="w", pady=15)
-        tk.Button(frame, text="查看全部用户", command=self.show_all_users_gui).grid(row=10, column=0, padx=5)
+        # 管理员功能
+        section(9, "👑 管理员功能")
+        self._btn(frame, "查看全部用户", self.show_all_users_gui).grid(row=10, column=0, padx=5, pady=5)
 
-        tk.Button(frame, text="注销登录", fg="red", command=self.logout_gui).grid(row=11, column=0, columnspan=3, pady=20)
-
-    def update_balance_label(self):
-        bal = get_balance(self.current_user_id)
-        self.user_label.config(text=f"当前用户：ID {self.current_user_id}  |  余额：{bal} 元")
-        self.penalty_label.config(text=f"待缴罚款：{get_user_total_penalty(self.current_user_id)} 元")
+        # 注销
+        self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=11, column=0, columnspan=3, pady=(24, 0))
 
     def recharge_gui(self):
         money = self.entry_recharge.get().strip()
         try:
             money = float(money)
-            if money <= 0:
-                messagebox.showwarning("提示", "金额必须大于0")
-                return
-            recharge_balance(self.current_user_id, money)
-            messagebox.showinfo("成功", "充值成功")
-            self.update_balance_label()
-            self.entry_recharge.delete(0, tk.END)
         except ValueError:
             messagebox.showerror("错误", "请输入有效金额")
+            return
+        if money <= 0:
+            messagebox.showwarning("提示", "金额必须大于0")
+            return
+        recharge_balance(self.current_user_id, money)
+        messagebox.showinfo("成功", "充值成功")
+        self.update_user_info()
+        self.entry_recharge.delete(0, tk.END)
 
     def modify_pwd_gui(self):
         old = self.entry_old_pwd.get().strip()
@@ -538,7 +594,8 @@ class LibraryApp:
             return
         if pay_fine(self.current_user_id, total):
             messagebox.showinfo("成功", "罚款缴纳完成")
-            self.update_balance_label()
+            self.update_user_info()
+            self.penalty_label.config(text=f"待缴罚款：{get_user_total_penalty(self.current_user_id)} 元")
         else:
             messagebox.showerror("错误", "余额不足")
 
@@ -555,60 +612,62 @@ class LibraryApp:
             messagebox.showerror("错误", "备份失败")
 
     def show_all_users_gui(self):
+        if not is_admin(self.current_user_id):
+            messagebox.showwarning("权限不足", "该功能仅管理员可用")
+            return
         users = get_all_users()
         if not users:
             messagebox.showinfo("全部用户", "暂无用户数据")
             return
-        lines = [f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元" for u in users]
+        lines = [f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元  【{'管理员' if u[3] == 1 else '普通用户'}】" for u in users]
         messagebox.showinfo("全部用户（管理员）", "\n".join(lines))
 
     def logout_gui(self):
         if messagebox.askyesno("确认", "确定注销登录？"):
             self.current_user_id = None
             self.notebook.destroy()
-            self.user_label.destroy()
+            self.user_label.master.destroy()   # 销毁整个标题栏
             self.show_login()
 
     # ========== 4. 统计报表标签页 ==========
     def init_stats_tab(self):
-        frame = tk.Frame(self.tab_stats, padx=20, pady=20)
+        frame = tk.Frame(self.tab_stats, bg=BG, padx=20, pady=16)
         frame.pack(fill="both", expand=True)
 
-        tk.Label(frame, text="📊 图书统计仪表盘", font=("微软雅黑", 12, "bold")).pack(anchor="w", pady=5)
-        self.dash_label = tk.Label(frame, text="", justify="left")
-        self.dash_label.pack(anchor="w", pady=5)
+        self._label(frame, "📊 图书统计仪表盘", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 4))
+        self.dash_label = self._label(frame, "", justify="left")
+        self.dash_label.pack(anchor="w", pady=4)
 
-        tk.Label(frame, text="🔥 热门借阅排行榜", font=("微软雅黑", 12, "bold")).pack(anchor="w", pady=(20, 5))
-        rank_frame = tk.Frame(frame)
+        self._label(frame, "🔥 热门借阅排行榜", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(14, 4))
+        rank_frame = tk.Frame(frame, bg=BG)
         rank_frame.pack(anchor="w")
-        tk.Label(rank_frame, text="Top").grid(row=0, column=0)
-        self.entry_rank_num = tk.Entry(rank_frame, width=5)
+        self._label(rank_frame, "Top").grid(row=0, column=0)
+        self.entry_rank_num = tk.Entry(rank_frame, width=5, font=(FONT, 10), relief="solid", bd=1)
         self.entry_rank_num.insert(0, "5")
         self.entry_rank_num.grid(row=0, column=1, padx=5)
-        tk.Button(rank_frame, text="查询", command=self.show_rank).grid(row=0, column=2, padx=5)
-        self.rank_text = tk.Text(frame, height=6, width=60)
-        self.rank_text.pack(anchor="w", pady=5)
+        self._btn(rank_frame, "查询", self.show_rank).grid(row=0, column=2, padx=5)
+        self.rank_text = tk.Text(frame, height=5, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.rank_text.pack(anchor="w", pady=4)
 
-        tk.Label(frame, text="📚 图书分类统计", font=("微软雅黑", 12, "bold")).pack(anchor="w", pady=(15, 5))
-        self.cat_text = tk.Text(frame, height=6, width=60)
-        self.cat_text.pack(anchor="w", pady=5)
+        self._label(frame, "📚 图书分类统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(12, 4))
+        self.cat_text = tk.Text(frame, height=5, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.cat_text.pack(anchor="w", pady=4)
 
-        tk.Label(frame, text="👤 我的借阅统计", font=("微软雅黑", 12, "bold")).pack(anchor="w", pady=(15, 5))
-        self.my_stats_label = tk.Label(frame, text="", justify="left")
-        self.my_stats_label.pack(anchor="w", pady=5)
+        self._label(frame, "👤 我的借阅统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(12, 4))
+        self.my_stats_label = self._label(frame, "", justify="left")
+        self.my_stats_label.pack(anchor="w", pady=4)
 
-        tk.Button(frame, text="刷新全部统计", command=self.refresh_all_stats).pack(pady=15)
+        self._btn(frame, "刷新全部统计", self.refresh_all_stats, primary=True).pack(pady=14)
         self.refresh_all_stats()
 
     def refresh_all_stats(self):
         dash = get_book_dashboard()
-        dash_text = f"""图书总数：{dash['total_book']} 本
-已借出：{dash['borrowed']} 本
-在架可借：{dash['available']} 本"""
-        self.dash_label.config(text=dash_text)
+        self.dash_label.config(text=f"图书总数：{dash['total_book']} 本    已借出：{dash['borrowed']} 本    在架可借：{dash['available']} 本")
 
         self.cat_text.delete(1.0, tk.END)
         cat_list = get_category_stat()
+        if not cat_list:
+            self.cat_text.insert(tk.END, "暂无图书数据")
         for c in cat_list:
             self.cat_text.insert(tk.END, f"{c['category']}：总计{c['total']}本 | 在架{c['in_stock']}本 | 借出{c['borrowed']}本\n")
 
@@ -618,27 +677,25 @@ class LibraryApp:
     def show_rank(self):
         try:
             num = int(self.entry_rank_num.get().strip())
-            if num <= 0:
-                return
-            rank = get_hot_book_rank(num)
-            self.rank_text.delete(1.0, tk.END)
-            if not rank:
-                self.rank_text.insert(tk.END, "暂无借阅数据")
-                return
-            for i, item in enumerate(rank):
-                self.rank_text.insert(tk.END, f"{i+1}. 《{item[1]}》 - {item[2]} | 借阅次数：{item[3]}\n")
         except ValueError:
-            pass
+            return
+        if num <= 0:
+            return
+        rank = get_hot_book_rank(num)
+        self.rank_text.delete(1.0, tk.END)
+        if not rank:
+            self.rank_text.insert(tk.END, "暂无借阅数据")
+            return
+        for i, item in enumerate(rank):
+            self.rank_text.insert(tk.END, f"{i + 1}. 《{item[1]}》 - {item[2]} | 借阅次数：{item[3]}\n")
 
     def show_my_stats(self):
         stats = get_user_borrow_stats(self.current_user_id)
         if not stats:
             text = "暂无借阅数据"
         else:
-            text = (f"累计借阅：{stats['total_borrow']} 本\n"
-                    f"已归还：{stats['returned']} 本\n"
-                    f"未归还：{stats['unreturned']} 本\n"
-                    f"逾期未还：{stats['overdue_count']} 本\n"
+            text = (f"累计借阅：{stats['total_borrow']} 本    已归还：{stats['returned']} 本    "
+                    f"未归还：{stats['unreturned']} 本\n逾期未还：{stats['overdue_count']} 本    "
                     f"累计产生罚款：{stats['total_penalty']} 元")
         self.my_stats_label.config(text=text)
 

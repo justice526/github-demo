@@ -3,6 +3,18 @@ from user import *
 from borrow import *
 from db import init_db
 
+
+def input_int(prompt, default=None):
+    """安全读取整数输入：非数字时返回 None（有默认值时返回默认值）"""
+    raw = input(prompt).strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def show_menu():
     print("\n=====个人图书管理系统=====")
     print("1. 用户注册")
@@ -36,12 +48,15 @@ def show_menu():
     print("29. 查看全部用户（管理员）")
     print("0. 退出程序")
     print("==========================")
-def main():
-    init_db()
+def _run_loop():
     current_user_id = None
     while True:
         show_menu()
-        opt = input("请输入功能编号：")
+        try:
+            opt = input("请输入功能编号：").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋程序退出")
+            break
         if opt == "1":
             username = input("输入注册用户名：")
             pwd = input("输入密码：")
@@ -58,7 +73,8 @@ def main():
             if uid:
                 current_user_id = uid
                 bal = get_balance(current_user_id)
-                print(f"✅登录成功，你的用户ID:{current_user_id}，当前余额：{bal}元")
+                role = "（管理员）" if is_admin(current_user_id) else ""
+                print(f"✅登录成功{role}，你的用户ID:{current_user_id}，当前余额：{bal}元")
             else:
                 print("❌账号或密码错误")
         elif opt == "3":
@@ -82,7 +98,10 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            bid = int(input("要修改的图书ID："))
+            bid = input_int("要修改的图书ID：")
+            if bid is None:
+                print("❌请输入有效的图书ID（数字）！")
+                continue
             new_title = input("新书名：")
             new_author = input("新作者：")
             new_category = input("新分类：")
@@ -95,7 +114,10 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            bid = int(input("要删除的图书ID："))
+            bid = input_int("要删除的图书ID：")
+            if bid is None:
+                print("❌请输入有效的图书ID（数字）！")
+                continue
             res = delete_book(bid)
             if res:
                 print("✅已删除")
@@ -104,7 +126,10 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            bid = int(input("要借阅的图书ID："))
+            bid = input_int("要借阅的图书ID：")
+            if bid is None:
+                print("❌请输入有效的图书ID（数字）！")
+                continue
             res = borrow_book(current_user_id, bid)
             if res:
                 print("✅借阅成功")
@@ -115,7 +140,10 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
-            bid = int(input("输入归还图书ID："))
+            bid = input_int("输入归还图书ID：")
+            if bid is None:
+                print("❌请输入有效的图书ID（数字）！")
+                continue
             res = return_book(current_user_id, bid)
             if res is not False:
                 print(f"归还成功，罚款：{res}元")
@@ -409,14 +437,30 @@ def main():
             if not current_user_id:
                 print("⚠请先登录！")
                 continue
+            if not is_admin(current_user_id):
+                print("❌该功能仅管理员可用！")
+                continue
             users = get_all_users()
             print("\n==== 全部用户（管理员） ====")
             for u in users:
-                print(f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元")
+                role = "管理员" if u[3] == 1 else "普通用户"
+                print(f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元  【{role}】")
         elif opt == "0":
             print("👋程序退出")
             break
         else:
             print("❌无效输入，请重新选择")
+
+
+def main():
+    init_db()
+    try:
+        _run_loop()
+    except (KeyboardInterrupt, EOFError):
+        print("\n👋程序退出")
+    except Exception as e:
+        print(f"\n❌程序发生异常：{e}")
+
+
 if __name__ == "__main__":
     main()

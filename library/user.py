@@ -86,11 +86,20 @@ def reset_password_by_qa(username, security_ans, new_pwd):
     conn.close()
     return True
 
+# ===== 管理员：判断当前用户是否为管理员 =====
+def is_admin(user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT is_admin FROM user WHERE id=?", (user_id,))
+    res = cur.fetchone()
+    conn.close()
+    return bool(res and res[0] == 1)
+
 # ===== 管理员：查询全部用户 =====
 def get_all_users():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT id, username, balance FROM user")
+    cur.execute("SELECT id, username, balance, is_admin FROM user")
     data = cur.fetchall()
     conn.close()
     return data
