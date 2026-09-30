@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 from book import *
 from user import *
 from borrow import *
+from rating import *
 from db import init_db
 
 # ===== 浅色主题配色 =====
@@ -221,9 +222,10 @@ class LibraryApp:
 
         btn_group = tk.Frame(left, bg=BG)
         btn_group.grid(row=6, column=0, columnspan=2, pady=8)
-        actions = [("添加图书", self.add_book_gui, True), ("修改图书", self.update_book_gui, False),
-                   ("删除图书", self.delete_book_gui, False), ("关键词搜索", self.search_book_gui, False),
-                   ("按分类筛选", self.filter_by_category_gui, False), ("批量导入图书", self.batch_import_book_gui, False),
+        actions = [("🔍 高级搜索", self.advanced_search_gui, True), ("添加图书", self.add_book_gui, False),
+                   ("修改图书", self.update_book_gui, False), ("删除图书", self.delete_book_gui, False),
+                   ("关键词搜索", self.search_book_gui, False), ("按分类筛选", self.filter_by_category_gui, False),
+                   ("图书详情", self.open_selected_detail, False), ("批量导入图书", self.batch_import_book_gui, False),
                    ("恢复备份", self.restore_backup_gui, False), ("刷新全部", self.refresh_book_list, False)]
         for i, (text, cmd, primary) in enumerate(actions):
             self._btn(btn_group, text, cmd, primary=primary, width=14).grid(row=i, column=0, pady=3)
@@ -292,6 +294,8 @@ class LibraryApp:
         self.page_label.pack(side="right", padx=10)
 
         self.book_tree.bind("<<TreeviewSelect>>", self.on_book_select)
+        self.book_tree.bind("<Double-1>", self.on_book_double_click)
+        self.cover_canvas.bind("<Button-1>", self.on_cover_click)
         self.refresh_book_list()
 
     def fill_book_tree(self, books):
@@ -351,6 +355,45 @@ class LibraryApp:
                 entry.delete(0, tk.END)
                 entry.insert(0, val)
             self.draw_book_cover(item)
+
+    # ========== 图书详情入口 ==========
+    def _selected_book_id(self):
+        """取当前选中图书的 ID，未选中返回 None"""
+        sel = self.book_tree.selection()
+        if not sel:
+            return None
+        vals = self.book_tree.item(sel[0])["values"]
+        try:
+            return int(vals[0])
+        except (ValueError, TypeError, IndexError):
+            return None
+
+    def on_book_double_click(self, event):
+        """双击图书列表 → 打开详情窗口"""
+        row = self.book_tree.identify_row(event.y)
+        if not row:
+            return
+        vals = self.book_tree.item(row)["values"]
+        try:
+            self.show_book_detail(int(vals[0]))
+        except (ValueError, TypeError, IndexError):
+            pass
+
+    def on_cover_click(self, event):
+        """点击封面卡片 → 打开详情窗口"""
+        bid = self._selected_book_id()
+        if bid is None:
+            messagebox.showinfo("提示", "请先在左侧列表中选择一本图书")
+            return
+        self.show_book_detail(bid)
+
+    def open_selected_detail(self):
+        """「图书详情」按钮"""
+        bid = self._selected_book_id()
+        if bid is None:
+            messagebox.showinfo("提示", "请先在右侧列表中选择一本图书")
+            return
+        self.show_book_detail(bid)
 
     def add_book_gui(self):
         title = self.entry_title.get().strip()
@@ -457,16 +500,15 @@ class LibraryApp:
             return [""]
         return [text[i:i + per_line] for i in range(0, len(text), per_line)]
 
-    def draw_book_cover(self, book):
-        """在封面 Canvas 上绘制图书封面卡片
-        :param book: (id, title, author, category, status) 或 None（绘制占位）
+    def _paint_cover(self, c, book, width=200, height=272):
+        """把图书封面画到指定 Canvas 上（主界面与详情窗口共用）
+        :param book: (id, title, author, category, status) 或 None（占位）
         """
-        c = self.cover_canvas
         c.delete("all")
         if not book:
-            c.create_rectangle(2, 2, 190, 262, fill="#f4f6fa", outline=LINE, dash=(4, 3))
-            c.create_text(96, 118, text="📖", font=(FONT, 26), fill="#c8d0dc")
-            c.create_text(96, 158, text="未选择图书", font=(FONT, 9), fill=MUTED)
+            c.create_rectangle(2, 2, width - 10, height - 10, fill="#f4f6fa", outline=LINE, dash=(4, 3))
+            c.create_text(width / 2 - 2, height / 2 - 20, text="📖", font=(FONT, 26), fill="#c8d0dc")
+            c.create_text(width / 2 - 2, height / 2 + 20, text="未选择图书", font=(FONT, 9), fill=MUTED)
             return
 
         bid, title, author, category, status = book
@@ -475,38 +517,56 @@ class LibraryApp:
         base = CHART_COLORS[idx]
         dark = _shade(base, 0.72)
         borrowed = str(status) in ("已借出", "1")
+        right, bottom = width - 10, height - 10
+        cx = (2 + right) / 2 + 8
 
         # 阴影 + 封面主体 + 书脊
-        c.create_rectangle(6, 6, 194, 266, fill="#d9dee7", outline="")
-        c.create_rectangle(2, 2, 190, 262, fill=base, outline="")
-        c.create_rectangle(2, 2, 17, 262, fill=dark, outline="")
-        c.create_line(20, 2, 20, 262, fill=dark, width=1)
-        # 顶部装饰线
-        c.create_line(34, 42, 174, 42, fill="#ffffff", width=1)
+        c.create_rectangle(6, 6, right + 4, bottom + 4, fill="#d9dee7", outline="")
+        c.create_rectangle(2, 2, right, bottom, fill=base, outline="")
+        c.create_rectangle(2, 2, 17, bottom, fill=dark, outline="")
+        c.create_line(20, 2, 20, bottom, fill=dark, width=1)
+        c.create_line(34, 42, right - 16, 42, fill="#ffffff", width=1)
 
-        # 书名（最多 3 行自动换行）
+        # 书名（最多 3 行自动换行）+ 作者
         lines = self._wrap_text(title, 9)[:3]
         y = 78 if len(lines) < 3 else 64
         for line in lines:
-            c.create_text(104, y, text=line, fill="#ffffff", font=(FONT, 13, "bold"))
+            c.create_text(cx, y, text=line, fill="#ffffff", font=(FONT, 13, "bold"))
             y += 26
-        # 作者
-        c.create_text(104, y + 14, text=str(author or "佚名"), fill="#f2f5ff", font=(FONT, 9))
+        c.create_text(cx, y + 14, text=str(author or "佚名"), fill="#f2f5ff", font=(FONT, 9))
 
         # 底部信息区
-        c.create_line(34, 216, 174, 216, fill="#ffffff", width=1)
-        c.create_text(104, 232, text=str(category or "未分类"), fill="#ffffff", font=(FONT, 9))
-        c.create_text(104, 250, text=f"编号 #{bid}", fill="#e6ecff", font=(FONT, 8))
+        c.create_line(34, bottom - 46, right - 16, bottom - 46, fill="#ffffff", width=1)
+        c.create_text(cx, bottom - 30, text=str(category or "未分类"), fill="#ffffff", font=(FONT, 9))
+        c.create_text(cx, bottom - 12, text=f"编号 #{bid}", fill="#e6ecff", font=(FONT, 8))
 
         # 右上角状态角标
         tag_color = DANGER if borrowed else SUCCESS
         tag_text = "已借出" if borrowed else "在架可借"
-        c.create_rectangle(118, 12, 182, 30, fill=tag_color, outline="")
-        c.create_text(150, 21, text=tag_text, fill="#ffffff", font=(FONT, 8))
+        c.create_rectangle(right - 72, 12, right - 8, 30, fill=tag_color, outline="")
+        c.create_text(right - 40, 21, text=tag_text, fill="#ffffff", font=(FONT, 8))
 
-        # 卡片下方文字信息
+    def _rating_line(self, book_id):
+        """生成评分文本行，例如「评分：★★★★☆ 4.5（3人）」"""
+        r = get_book_rating(int(book_id), self.current_user_id)
+        if r["count"] > 0:
+            return f"评分：{star_text(r['avg'])} {r['avg']}（{r['count']}人）"
+        return "评分：暂无评分"
+
+    def draw_book_cover(self, book):
+        """绘制主界面右侧封面卡片，并刷新下方文字信息
+        :param book: (id, title, author, category, status) 或 None
+        """
+        self._paint_cover(self.cover_canvas, book)
+        if not book:
+            self.cover_info.config(text="← 在左侧列表中\n   选择一本图书", fg=MUTED)
+            return
+        bid, title, author, category, status = book
+        borrowed = str(status) in ("已借出", "1")
+        tag_text = "已借出" if borrowed else "在架可借"
         self.cover_info.config(
-            text=f"《{title}》\n作者：{author or '佚名'}\n分类：{category or '未分类'}\n状态：{tag_text}",
+            text=f"《{title}》\n作者：{author or '佚名'}\n分类：{category or '未分类'}\n"
+                 f"状态：{tag_text}\n{self._rating_line(bid)}\n（双击列表可查看详情）",
             fg=DANGER if borrowed else TEXT)
 
     # ========== 2. 借阅管理标签页 ==========
@@ -691,13 +751,15 @@ class LibraryApp:
         section(7, "📤 数据导出")
         self._btn(frame, "导出借阅记录到TXT", self.export_record_gui).grid(row=8, column=0, padx=5, pady=5)
         self._btn(frame, "备份图书数据JSON", self.backup_book_gui).grid(row=8, column=1, padx=5, pady=5)
+        self._btn(frame, "导出我的记录CSV", self.export_csv_gui).grid(row=9, column=0, padx=5, pady=5)
+        self._btn(frame, "导出全库记录CSV", self.export_all_csv_gui).grid(row=9, column=1, padx=5, pady=5)
 
         # 管理员功能
-        section(9, "👑 管理员功能")
-        self._btn(frame, "查看全部用户", self.show_all_users_gui).grid(row=10, column=0, padx=5, pady=5)
+        section(10, "👑 管理员功能")
+        self._btn(frame, "查看全部用户", self.show_all_users_gui).grid(row=11, column=0, padx=5, pady=5)
 
         # 注销
-        self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=11, column=0, columnspan=3, pady=(24, 0))
+        self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=12, column=0, columnspan=3, pady=(24, 0))
 
     def recharge_gui(self):
         money = self.entry_recharge.get().strip()
@@ -744,6 +806,39 @@ class LibraryApp:
     def export_record_gui(self):
         if export_borrow_record_to_txt(self.current_user_id):
             messagebox.showinfo("成功", "导出成功，文件：borrow_record.txt")
+        else:
+            messagebox.showerror("错误", "导出失败")
+
+    def export_csv_gui(self):
+        """导出我的借阅记录为 CSV（Excel 可直接打开）"""
+        path = filedialog.asksaveasfilename(
+            title="导出我的借阅记录为 CSV",
+            defaultextension=".csv",
+            initialfile="borrow_record.csv",
+            filetypes=[("CSV 文件", "*.csv"), ("所有文件", "*.*")]
+        )
+        if not path:
+            return
+        if export_borrow_record_to_csv(self.current_user_id, path):
+            messagebox.showinfo("成功", f"导出成功：\n{path}")
+        else:
+            messagebox.showerror("错误", "导出失败")
+
+    def export_all_csv_gui(self):
+        """导出全库借阅记录为 CSV（管理员）"""
+        if not is_admin(self.current_user_id):
+            messagebox.showwarning("权限不足", "该功能仅管理员可用")
+            return
+        path = filedialog.asksaveasfilename(
+            title="导出全库借阅记录为 CSV",
+            defaultextension=".csv",
+            initialfile="all_borrow_records.csv",
+            filetypes=[("CSV 文件", "*.csv"), ("所有文件", "*.*")]
+        )
+        if not path:
+            return
+        if export_all_borrow_to_csv(path):
+            messagebox.showinfo("成功", f"导出成功：\n{path}")
         else:
             messagebox.showerror("错误", "导出失败")
 
@@ -795,14 +890,18 @@ class LibraryApp:
         self.bar_canvas = tk.Canvas(bar_wrap, width=500, height=188, bg=PANEL, highlightthickness=0)
         self.bar_canvas.pack(padx=4, pady=4)
 
-        self._label(frame, "🔥 热门借阅排行榜", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
+        self._label(frame, "🔥 排行榜", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
         rank_frame = tk.Frame(frame, bg=BG)
         rank_frame.pack(anchor="w")
-        self._label(rank_frame, "Top").grid(row=0, column=0)
+        self._label(rank_frame, "榜单：").grid(row=0, column=0)
+        self.rank_type = ttk.Combobox(rank_frame, values=["借阅次数", "好评榜"], width=9, state="readonly")
+        self.rank_type.set("借阅次数")
+        self.rank_type.grid(row=0, column=1, padx=4)
+        self._label(rank_frame, "Top").grid(row=0, column=2, padx=(8, 0))
         self.entry_rank_num = tk.Entry(rank_frame, width=5, font=(FONT, 10), relief="solid", bd=1)
         self.entry_rank_num.insert(0, "5")
-        self.entry_rank_num.grid(row=0, column=1, padx=5)
-        self._btn(rank_frame, "查询", self.show_rank).grid(row=0, column=2, padx=5)
+        self.entry_rank_num.grid(row=0, column=3, padx=5)
+        self._btn(rank_frame, "查询", self.show_rank).grid(row=0, column=4, padx=5)
         self.rank_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1)
         self.rank_text.pack(anchor="w", pady=3)
 
@@ -924,8 +1023,22 @@ class LibraryApp:
             return
         if num <= 0:
             return
-        rank = get_hot_book_rank(num)
         self.rank_text.delete(1.0, tk.END)
+
+        # 好评榜：按读者平均评分排序
+        if self.rank_type.get() == "好评榜":
+            rows = get_top_rated(num)
+            if not rows:
+                self.rank_text.insert(tk.END, "暂无评分数据（可在图书详情窗口中为图书打分）")
+                return
+            for i, item in enumerate(rows):
+                self.rank_text.insert(
+                    tk.END,
+                    f"{i + 1}. 《{item[1]}》 - {item[2]} | {star_text(item[3])} {item[3]} 分（{item[4]} 人评）\n")
+            return
+
+        # 借阅榜：按被借阅次数排序
+        rank = get_hot_book_rank(num)
         if not rank:
             self.rank_text.insert(tk.END, "暂无借阅数据")
             return
@@ -942,9 +1055,212 @@ class LibraryApp:
                     f"累计产生罚款：{stats['total_penalty']} 元")
         self.my_stats_label.config(text=text)
 
+    # ========== 图书详情窗口 ==========
+    def show_book_detail(self, book_id):
+        """图书详情：封面 + 基本信息 + 我的评分 + 读者评论 + 借阅历史 + 快捷操作"""
+        book = get_book_by_id(book_id)
+        if not book:
+            messagebox.showerror("错误", "图书不存在或已被删除")
+            return
+        bid, title, author, category, is_borrow = book
+        status = "已借出" if is_borrow == 1 else "在架可借"
+
+        win = tk.Toplevel(self.root)
+        win.title(f"图书详情 - 《{title}》")
+        win.configure(bg=BG)
+        win.geometry("820x640")
+        win.minsize(760, 580)
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=BG, padx=16, pady=14)
+        body.pack(fill="both", expand=True)
+
+        # ---- 左侧：封面 ----
+        left = tk.Frame(body, bg=PANEL, padx=12, pady=12,
+                        highlightbackground=LINE, highlightthickness=1)
+        left.pack(side="left", fill="y")
+        cv = tk.Canvas(left, width=200, height=272, bg=PANEL, highlightthickness=0)
+        cv.pack()
+        self._paint_cover(cv, (bid, title, author, category, status))
+        self._label(left, self._rating_line(bid), size=9, fg=MUTED, bg=PANEL).pack(anchor="w", pady=(8, 0))
+
+        # ---- 右侧：信息 / 评分 / 评论 / 历史 ----
+        right = tk.Frame(body, bg=BG)
+        right.pack(side="left", fill="both", expand=True, padx=(16, 0))
+
+        self._label(right, "📘 基本信息", size=12, bold=True, fg=ACCENT).pack(anchor="w")
+        info = tk.Frame(right, bg=BG)
+        info.pack(anchor="w", pady=4)
+        borrower = get_current_borrower(bid)
+        info_rows = [
+            ("图书编号", f"#{bid}"),
+            ("书名", title),
+            ("作者", author or "佚名"),
+            ("分类", category or "未分类"),
+            ("当前状态", status + (f"（借阅人：{borrower}）" if borrower else "")),
+            ("历史借阅", f"{get_book_borrow_count(bid)} 次"),
+        ]
+        for i, (k, v) in enumerate(info_rows):
+            self._label(info, k + "：", size=9, fg=MUTED).grid(row=i, column=0, sticky="e", pady=1)
+            self._label(info, str(v), size=9).grid(row=i, column=1, sticky="w", padx=6, pady=1)
+
+        # ---- 我的评分 ----
+        self._label(right, "⭐ 我的评分", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
+        my = get_book_rating(bid, self.current_user_id)
+        rate_row = tk.Frame(right, bg=BG)
+        rate_row.pack(anchor="w")
+        self._label(rate_row, "打分：").pack(side="left")
+        score_var = tk.StringVar(value=str(int(my["my_score"])) if my["my_score"] else "5")
+        ttk.Combobox(rate_row, textvariable=score_var, width=3, state="readonly",
+                     values=["1", "2", "3", "4", "5"]).pack(side="left", padx=4)
+        self._label(rate_row, " 评论：").pack(side="left")
+        comment_entry = tk.Entry(rate_row, width=26, font=(FONT, 9), relief="solid", bd=1)
+        comment_entry.insert(0, my["my_comment"])
+        comment_entry.pack(side="left", padx=4)
+
+        def submit_rating():
+            if rate_book(self.current_user_id, bid, score_var.get(), comment_entry.get().strip()):
+                messagebox.showinfo("成功", "评分已保存", parent=win)
+                win.destroy()
+                self.refresh_book_list()
+                self.show_book_detail(bid)
+            else:
+                messagebox.showerror("错误", "评分失败（分数需在 1~5 之间）", parent=win)
+
+        self._btn(rate_row, "提交评分", submit_rating, primary=True).pack(side="left", padx=4)
+
+        # ---- 读者评论 ----
+        comments = get_book_comments(bid, 3)
+        if comments:
+            cmt = "\n".join(f"· {u or '匿名'}（{s}分）：{c}" for u, s, c, t in comments)
+            self._label(right, "💬 读者评论\n" + cmt, size=9, fg=MUTED,
+                        justify="left", wraplength=500).pack(anchor="w", pady=(6, 0))
+
+        # ---- 借阅历史 ----
+        self._label(right, "📜 借阅历史", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
+        hist_cols = ("user", "borrow_time", "deadline", "return_time", "penalty")
+        hist = ttk.Treeview(right, columns=hist_cols, show="headings", height=5)
+        for col, txt, w, anchor in [("user", "借阅人", 80, None), ("borrow_time", "借阅时间", 125, "center"),
+                                    ("deadline", "应还时间", 125, "center"), ("return_time", "归还时间", 125, "center"),
+                                    ("penalty", "罚款", 55, "center")]:
+            hist.heading(col, text=txt)
+            hist.column(col, width=w, anchor=anchor or "w")
+        for h in get_book_borrow_history(bid, 20):
+            hist.insert("", "end", values=(h[0] or "已注销用户", h[1], h[2],
+                                           h[3] if h[3] else "未归还", h[4] or 0))
+        if not hist.get_children():
+            hist.insert("", "end", values=("暂无借阅记录", "", "", "", ""))
+        hist.pack(fill="both", expand=True, pady=(0, 8))
+
+        # ---- 快捷操作 ----
+        btns = tk.Frame(right, bg=BG)
+        btns.pack(anchor="w")
+
+        def do_borrow():
+            if borrow_book(self.current_user_id, bid):
+                messagebox.showinfo("成功", "借阅成功，借期 7 天", parent=win)
+                win.destroy()
+                self.refresh_book_list()
+                self.refresh_my_borrow()
+            else:
+                messagebox.showerror("错误", "借阅失败，图书不存在或已被借出", parent=win)
+
+        def do_return():
+            res = return_book(self.current_user_id, bid)
+            if res is not False:
+                messagebox.showinfo("成功", f"归还成功\n产生罚款：{res} 元", parent=win)
+                win.destroy()
+                self.refresh_book_list()
+                self.refresh_my_borrow()
+                self.update_user_info()
+            else:
+                messagebox.showerror("错误", "归还失败，你没有这本书的未归还记录", parent=win)
+
+        self._btn(btns, "借阅本书", do_borrow, primary=True).pack(side="left", padx=3)
+        btn_ret = self._btn(btns, "归还本书", do_return, bg=SUCCESS)
+        btn_ret.pack(side="left", padx=3)
+        if get_my_current_borrow(self.current_user_id, bid) is None:
+            btn_ret.config(state="disabled")
+        self._btn(btns, "关闭", win.destroy).pack(side="left", padx=3)
+
+    # ========== 高级组合搜索窗口 ==========
+    def advanced_search_gui(self):
+        """书名 + 作者 + 分类 + 状态 多条件组合搜索"""
+        win = tk.Toplevel(self.root)
+        win.title("高级搜索")
+        win.configure(bg=BG)
+        win.geometry("440x370")
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        f = tk.Frame(win, bg=BG, padx=22, pady=16)
+        f.pack(fill="both", expand=True)
+
+        self._label(f, "🔍 多条件组合搜索", size=12, bold=True, fg=ACCENT).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        self._label(f, "书名包含：").grid(row=1, column=0, sticky="e", pady=5)
+        e_title = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1)
+        e_title.grid(row=1, column=1, pady=5, sticky="w")
+
+        self._label(f, "作者包含：").grid(row=2, column=0, sticky="e", pady=5)
+        e_author = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1)
+        e_author.grid(row=2, column=1, pady=5, sticky="w")
+
+        self._label(f, "分类：").grid(row=3, column=0, sticky="e", pady=5)
+        cb_cat = ttk.Combobox(f, values=["不限"] + get_all_categories(), width=20, state="readonly")
+        cb_cat.set("不限")
+        cb_cat.grid(row=3, column=1, pady=5, sticky="w")
+
+        self._label(f, "状态：").grid(row=4, column=0, sticky="e", pady=5)
+        cb_status = ttk.Combobox(f, values=["不限", "在架可借", "已借出"], width=20, state="readonly")
+        cb_status.set("不限")
+        cb_status.grid(row=4, column=1, pady=5, sticky="w")
+
+        self._label(f, "排序：").grid(row=5, column=0, sticky="e", pady=5)
+        sort_row = tk.Frame(f, bg=BG)
+        sort_row.grid(row=5, column=1, sticky="w", pady=5)
+        cb_sort = ttk.Combobox(sort_row, values=["ID", "书名", "作者", "分类"], width=8, state="readonly")
+        cb_sort.set("ID")
+        cb_sort.pack(side="left")
+        cb_order = ttk.Combobox(sort_row, values=["升序", "降序"], width=6, state="readonly")
+        cb_order.set("升序")
+        cb_order.pack(side="left", padx=6)
+
+        def do_search():
+            field_map = {"ID": "id", "书名": "title", "作者": "author", "分类": "category"}
+            status_map = {"不限": None, "在架可借": 0, "已借出": 1}
+            cat = cb_cat.get()
+            result = advanced_search(
+                title_kw=e_title.get().strip() or None,
+                author_kw=e_author.get().strip() or None,
+                category=None if cat == "不限" else cat,
+                status=status_map.get(cb_status.get()),
+                sort_by=field_map.get(cb_sort.get(), "id"),
+                order="desc" if cb_order.get() == "降序" else "asc",
+            )
+            self.fill_book_tree(result)
+            self.page_label.config(text=f"高级搜索：命中 {len(result)} 本")
+            win.destroy()
+
+        def do_reset():
+            for e in (e_title, e_author):
+                e.delete(0, tk.END)
+            cb_cat.set("不限")
+            cb_status.set("不限")
+            cb_sort.set("ID")
+            cb_order.set("升序")
+
+        btns = tk.Frame(f, bg=BG)
+        btns.grid(row=6, column=0, columnspan=2, pady=18)
+        self._btn(btns, "开始搜索", do_search, primary=True, width=10).pack(side="left", padx=6)
+        self._btn(btns, "重置条件", do_reset, width=10).pack(side="left", padx=6)
+        self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=6)
+
 
 def run():
     init_db()
+    init_rating_table()
     root = tk.Tk()
     app = LibraryApp(root)
     root.mainloop()

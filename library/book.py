@@ -313,5 +313,103 @@ def get_books_sorted(sort_by="id", order="asc"):
     finally:
         conn.close()
 
+# ========== 高级组合搜索 ==========
+def advanced_search(title_kw=None, author_kw=None, category=None, status=None,
+                    sort_by="id", order="asc"):
+    """多条件组合搜索图书
+    :param title_kw: 书名关键词（模糊匹配）
+    :param author_kw: 作者关键词（模糊匹配）
+    :param category: 分类（精确匹配）
+    :param status: 借阅状态 0=在架 1=已借出，None 表示不限
+    :param sort_by: 排序字段 id/title/author/category
+    :param order: asc 升序 / desc 降序
+    :return: 图书列表 [(id,title,author,category,is_borrow), ...]
+    """
+    # 字段白名单校验，防止 SQL 注入
+    allow_fields = ["id", "title", "author", "category"]
+    if sort_by not in allow_fields:
+        sort_by = "id"
+    order = "desc" if str(order).lower() == "desc" else "asc"
+
+    sql = "SELECT id,title,author,category,is_borrow FROM book WHERE 1=1"
+    params = []
+    if title_kw:
+        sql += " AND title LIKE ?"
+        params.append(f"%{title_kw}%")
+    if author_kw:
+        sql += " AND author LIKE ?"
+        params.append(f"%{author_kw}%")
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+    if status is not None and str(status) != "":
+        try:
+            sql += " AND is_borrow = ?"
+            params.append(int(status))
+        except (TypeError, ValueError):
+            pass
+    sql += f" ORDER BY {sort_by} {order}"
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(sql, params)
+        return cur.fetchall()
+    except Exception as e:
+        print("高级搜索异常：", e)
+        return []
+    finally:
+        conn.close()
+
+
+def get_all_categories():
+    """获取库中全部已有分类名（用于下拉框选项）"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT DISTINCT category FROM book
+        WHERE category IS NOT NULL AND category != ''
+        ORDER BY category
+    ''')
+    res = [r[0] for r in cur.fetchall()]
+    conn.close()
+    return res
+
+
+def get_book_borrow_count(book_id):
+    """统计某本书的历史借阅次数"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM borrow_record WHERE book_id = ?", (book_id,))
+    n = cur.fetchone()[0]
+    conn.close()
+    return n
+
+
+def get_book_by_id(book_id):
+    """按 ID 查询单本图书"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id,title,author,category,is_borrow FROM book WHERE id = ?", (book_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_current_borrower(book_id):
+    """查询某本书当前借阅人用户名（未借出则返回 None）"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT u.username FROM borrow_record br
+        LEFT JOIN user u ON br.user_id = u.id
+        WHERE br.book_id = ? AND br.return_time IS NULL
+        ORDER BY br.borrow_time DESC LIMIT 1
+    ''', (book_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
 if __name__ == "__main__":
     print("book模块加载完成")

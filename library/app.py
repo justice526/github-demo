@@ -1,6 +1,7 @@
 from book import *
 from user import *
 from borrow import *
+from rating import *
 from db import init_db
 
 
@@ -65,6 +66,9 @@ def show_menu():
     print("28. 忘记密码（密保找回）")
     print("29. 查看全部用户（管理员）")
     print("30. 借阅到期提醒")
+    print("31. 图书评分/评论")
+    print("32. 好评排行榜")
+    print("33. 导出借阅记录CSV")
     print("0. 退出程序")
     print("==========================")
 def _run_loop():
@@ -483,6 +487,50 @@ def _run_loop():
                     print(f"⏰ 3 天内到期 {len(due_soon)} 本：")
                     for item in due_soon:
                         print(f"   《{item['title']}》 剩余 {item['remain_days']} 天（截止 {item['deadline']}）")
+        elif opt == "31":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            bid = input_int("要给哪本图书评分（图书ID）：")
+            if bid is None:
+                print("❌图书ID必须是数字")
+                continue
+            book = get_book_by_id(bid)
+            if not book:
+                print("❌图书不存在")
+                continue
+            old = get_book_rating(bid, current_user_id)
+            if old["my_score"]:
+                print(f"你上次给《{book[1]}》打了 {old['my_score']} 分，本次将覆盖")
+            score = input_int("请输入评分（1~5）：")
+            if score is None or score < 1 or score > 5:
+                print("❌评分必须是 1~5 的整数")
+                continue
+            cmt = input("写一句评论（可留空）：").strip()
+            if rate_book(current_user_id, bid, score, cmt):
+                r = get_book_rating(bid, current_user_id)
+                print(f"✅ 评分成功！《{book[1]}》当前平均分 {r['avg']}（{r['count']} 人评分）")
+            else:
+                print("❌ 评分失败")
+        elif opt == "32":
+            top_n = input_int("查看前几名（默认5）：", default=5)
+            if top_n is None or top_n <= 0:
+                top_n = 5
+            rows = get_top_rated(top_n)
+            print("\n==== ⭐ 好评排行榜 ====")
+            if not rows:
+                print("暂无评分数据（可用「31. 图书评分/评论」为图书打分）")
+            for i, item in enumerate(rows):
+                print(f"{i + 1}. 《{item[1]}》 - {item[2]} | {star_text(item[3])} {item[3]}分（{item[4]}人评）")
+        elif opt == "33":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            path = input("导出文件名（默认 borrow_record.csv）：").strip() or "borrow_record.csv"
+            if export_borrow_record_to_csv(current_user_id, path):
+                print(f"✅ 导出成功：{path}")
+            else:
+                print("❌ 导出失败")
         elif opt == "0":
             print("👋程序退出")
             break
@@ -492,6 +540,7 @@ def _run_loop():
 
 def main():
     init_db()
+    init_rating_table()
     try:
         _run_loop()
     except (KeyboardInterrupt, EOFError):

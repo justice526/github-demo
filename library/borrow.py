@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import csv
 from datetime import datetime, timedelta
 
 def get_conn():
@@ -248,6 +249,105 @@ def get_due_soon_books(user_id, days=3):
             "remain_days": round(remain.total_seconds() / 86400, 1),
         })
     return result
+
+
+# ========== 借阅记录导出 CSV ==========
+def export_borrow_record_to_csv(user_id, save_path="borrow_record.csv"):
+    """把用户借阅记录导出为 CSV（带 UTF-8 BOM，Excel 可直接打开不乱码）
+    :return: True 成功 / False 失败
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT br.book_id, b.title, b.author, br.borrow_time,
+               br.return_deadline, br.return_time, br.penalty
+        FROM borrow_record br
+        LEFT JOIN book b ON br.book_id = b.id
+        WHERE br.user_id = ?
+        ORDER BY br.borrow_time DESC
+    ''', (user_id,))
+    records = cur.fetchall()
+    conn.close()
+    try:
+        with open(save_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["图书ID", "书名", "作者", "借阅时间", "应还时间", "归还时间", "罚款(元)"])
+            for row in records:
+                writer.writerow([
+                    row[0], row[1], row[2], row[3], row[4],
+                    row[5] if row[5] else "未归还",
+                    row[6] if row[6] else 0
+                ])
+        return True
+    except Exception as e:
+        print("导出CSV异常：", e)
+        return False
+
+
+def export_all_borrow_to_csv(save_path="all_borrow_records.csv"):
+    """导出全库借阅记录为 CSV（管理员用）"""
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT br.id, u.username, b.title, b.author, br.borrow_time,
+               br.return_deadline, br.return_time, br.penalty
+        FROM borrow_record br
+        LEFT JOIN book b ON br.book_id = b.id
+        LEFT JOIN user u ON br.user_id = u.id
+        ORDER BY br.borrow_time DESC
+    ''')
+    records = cur.fetchall()
+    conn.close()
+    try:
+        with open(save_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["记录ID", "借阅人", "书名", "作者", "借阅时间", "应还时间", "归还时间", "罚款(元)"])
+            for row in records:
+                writer.writerow([
+                    row[0], row[1], row[2], row[3], row[4], row[5],
+                    row[6] if row[6] else "未归还",
+                    row[7] if row[7] else 0
+                ])
+        return True
+    except Exception as e:
+        print("导出CSV异常：", e)
+        return False
+
+
+# ========== 某本书的借阅历史 ==========
+def get_book_borrow_history(book_id, limit=30):
+    """查询某本书的借阅历史（含借阅人用户名）
+    :return: [(用户名, 借阅时间, 应还时间, 归还时间, 罚款), ...]
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT u.username, br.borrow_time, br.return_deadline, br.return_time, br.penalty
+        FROM borrow_record br
+        LEFT JOIN user u ON br.user_id = u.id
+        WHERE br.book_id = ?
+        ORDER BY br.borrow_time DESC
+        LIMIT ?
+    ''', (book_id, limit))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_my_current_borrow(user_id, book_id):
+    """查询某用户对某本书是否有未归还记录
+    :return: (borrow_time, return_deadline) 或 None
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT borrow_time, return_deadline FROM borrow_record
+        WHERE user_id = ? AND book_id = ? AND return_time IS NULL
+        ORDER BY borrow_time DESC LIMIT 1
+    ''', (user_id, book_id))
+    row = cur.fetchone()
+    conn.close()
+    return row
 
 
 if __name__ == "__main__":
