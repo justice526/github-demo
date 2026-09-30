@@ -17,6 +17,23 @@ DANGER = "#e74c3c"      # 危险红
 SUCCESS = "#27ae60"     # 成功绿
 FONT = "微软雅黑"
 
+# ===== 图表 / 封面配色盘 =====
+CHART_COLORS = ["#3d6cf5", "#16a085", "#e67e22", "#8e44ad", "#e74c3c",
+                "#2980b9", "#27ae60", "#d35400", "#7f8c8d", "#c0392b"]
+
+
+def _shade(hex_color, factor=0.75):
+    """按系数加深（factor<1）或减淡（factor>1）一个十六进制颜色"""
+    try:
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        r = max(0, min(255, int(r * factor)))
+        g = max(0, min(255, int(g * factor)))
+        b = max(0, min(255, int(b * factor)))
+        return "#%02x%02x%02x" % (r, g, b)
+    except Exception:
+        return hex_color
+
 
 class LibraryApp:
     def __init__(self, root):
@@ -180,6 +197,8 @@ class LibraryApp:
         self.init_personal_tab()
         self.init_stats_tab()
         self.update_user_info()
+        # 登录后延迟自动检查借阅到期情况
+        self.root.after(400, self.auto_check_due)
 
     def update_user_info(self):
         bal = get_balance(self.current_user_id)
@@ -222,25 +241,45 @@ class LibraryApp:
         self.sort_order.grid(row=0, column=3, padx=3)
         self._btn(sort_frame, "排序", self.sort_books_gui, width=6).grid(row=0, column=4, padx=3)
 
-        # 右侧图书列表
+        # 右侧：图书列表 + 封面预览卡片
         right = tk.Frame(self.tab_book, bg=BG)
         right.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
+        # ---- 封面预览卡片（最右侧） ----
+        cover_frame = tk.Frame(right, bg=PANEL, padx=12, pady=12,
+                               highlightbackground=LINE, highlightthickness=1)
+        cover_frame.pack(side="right", fill="y", padx=(10, 0))
+        self._label(cover_frame, "📖 封面预览", size=10, bold=True, fg=ACCENT, bg=PANEL).pack(anchor="w")
+        self.cover_canvas = tk.Canvas(cover_frame, width=200, height=272, bg=PANEL,
+                                      highlightthickness=0, cursor="hand2")
+        self.cover_canvas.pack(pady=(8, 6))
+        self.cover_info = self._label(cover_frame, "← 在左侧列表中\n   选择一本图书", size=9,
+                                      fg=MUTED, bg=PANEL, justify="left", wraplength=200)
+        self.cover_info.pack(anchor="w")
+        self.draw_book_cover(None)
+
+        # ---- 图书列表区 ----
+        list_frame = tk.Frame(right, bg=BG)
+        list_frame.pack(side="left", fill="both", expand=True)
+
+        tree_wrap = tk.Frame(list_frame, bg=BG)
+        tree_wrap.pack(side="top", fill="both", expand=True)
+
         columns = ("id", "title", "author", "category", "status")
-        self.book_tree = ttk.Treeview(right, columns=columns, show="headings")
+        self.book_tree = ttk.Treeview(tree_wrap, columns=columns, show="headings")
         for col, txt, w, anchor in [("id", "ID", 60, "center"), ("title", "书名", 200, None),
                                     ("author", "作者", 120, None), ("category", "分类", 110, None),
                                     ("status", "状态", 90, "center")]:
             self.book_tree.heading(col, text=txt)
             self.book_tree.column(col, width=w, anchor=anchor or "w")
 
-        scroll = ttk.Scrollbar(right, orient="vertical", command=self.book_tree.yview)
+        scroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.book_tree.yview)
         self.book_tree.configure(yscrollcommand=scroll.set)
-        self.book_tree.pack(side="top", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        self.book_tree.pack(side="left", fill="both", expand=True)
 
         # 分页栏
-        page_bar = tk.Frame(right, bg=BG)
+        page_bar = tk.Frame(list_frame, bg=BG)
         page_bar.pack(side="bottom", fill="x", pady=6)
         self._label(page_bar, "每页").pack(side="left")
         self.entry_page_size = tk.Entry(page_bar, width=4, font=(FONT, 10), relief="solid", bd=1)
@@ -311,6 +350,7 @@ class LibraryApp:
                                (self.entry_author, item[2]), (self.entry_category, item[3])]:
                 entry.delete(0, tk.END)
                 entry.insert(0, val)
+            self.draw_book_cover(item)
 
     def add_book_gui(self):
         title = self.entry_title.get().strip()
@@ -409,6 +449,66 @@ class LibraryApp:
         for e in (self.entry_bid, self.entry_title, self.entry_author, self.entry_category):
             e.delete(0, tk.END)
 
+    # ========== 图书封面卡片（Canvas 绘制） ==========
+    def _wrap_text(self, text, per_line):
+        """把中文长文本按每行 per_line 个字切分"""
+        text = str(text or "")
+        if not text:
+            return [""]
+        return [text[i:i + per_line] for i in range(0, len(text), per_line)]
+
+    def draw_book_cover(self, book):
+        """在封面 Canvas 上绘制图书封面卡片
+        :param book: (id, title, author, category, status) 或 None（绘制占位）
+        """
+        c = self.cover_canvas
+        c.delete("all")
+        if not book:
+            c.create_rectangle(2, 2, 190, 262, fill="#f4f6fa", outline=LINE, dash=(4, 3))
+            c.create_text(96, 118, text="📖", font=(FONT, 26), fill="#c8d0dc")
+            c.create_text(96, 158, text="未选择图书", font=(FONT, 9), fill=MUTED)
+            return
+
+        bid, title, author, category, status = book
+        # 依据分类稳定地选取封面色（不用 hash，保证同一分类颜色固定）
+        idx = sum(ord(ch) for ch in str(category)) % len(CHART_COLORS)
+        base = CHART_COLORS[idx]
+        dark = _shade(base, 0.72)
+        borrowed = str(status) in ("已借出", "1")
+
+        # 阴影 + 封面主体 + 书脊
+        c.create_rectangle(6, 6, 194, 266, fill="#d9dee7", outline="")
+        c.create_rectangle(2, 2, 190, 262, fill=base, outline="")
+        c.create_rectangle(2, 2, 17, 262, fill=dark, outline="")
+        c.create_line(20, 2, 20, 262, fill=dark, width=1)
+        # 顶部装饰线
+        c.create_line(34, 42, 174, 42, fill="#ffffff", width=1)
+
+        # 书名（最多 3 行自动换行）
+        lines = self._wrap_text(title, 9)[:3]
+        y = 78 if len(lines) < 3 else 64
+        for line in lines:
+            c.create_text(104, y, text=line, fill="#ffffff", font=(FONT, 13, "bold"))
+            y += 26
+        # 作者
+        c.create_text(104, y + 14, text=str(author or "佚名"), fill="#f2f5ff", font=(FONT, 9))
+
+        # 底部信息区
+        c.create_line(34, 216, 174, 216, fill="#ffffff", width=1)
+        c.create_text(104, 232, text=str(category or "未分类"), fill="#ffffff", font=(FONT, 9))
+        c.create_text(104, 250, text=f"编号 #{bid}", fill="#e6ecff", font=(FONT, 8))
+
+        # 右上角状态角标
+        tag_color = DANGER if borrowed else SUCCESS
+        tag_text = "已借出" if borrowed else "在架可借"
+        c.create_rectangle(118, 12, 182, 30, fill=tag_color, outline="")
+        c.create_text(150, 21, text=tag_text, fill="#ffffff", font=(FONT, 8))
+
+        # 卡片下方文字信息
+        self.cover_info.config(
+            text=f"《{title}》\n作者：{author or '佚名'}\n分类：{category or '未分类'}\n状态：{tag_text}",
+            fg=DANGER if borrowed else TEXT)
+
     # ========== 2. 借阅管理标签页 ==========
     def init_borrow_tab(self):
         top = tk.Frame(self.tab_borrow, bg=BG, padx=10, pady=10)
@@ -427,6 +527,7 @@ class LibraryApp:
         self._btn(top, "续借", self.renew_book_gui).grid(row=0, column=6, padx=8)
         self._btn(top, "查看逾期图书", self.show_overdue_gui).grid(row=0, column=7, padx=8)
         self._btn(top, "刷新我的借阅", self.refresh_my_borrow).grid(row=0, column=8, padx=8)
+        self._btn(top, "🔔 到期提醒", self.show_due_reminder_gui, bg="#e67e22").grid(row=0, column=9, padx=8)
 
         columns = ("id", "title", "borrow_time", "deadline", "return_time", "penalty")
         self.borrow_tree = ttk.Treeview(self.tab_borrow, columns=columns, show="headings")
@@ -513,6 +614,47 @@ class LibraryApp:
             total += item['current_penalty']
         lines.append(f"\n当前累计逾期罚款：{round(total, 2)} 元")
         messagebox.showwarning("我的逾期图书", "\n".join(lines))
+
+    # ========== 借阅到期提醒 ==========
+    def show_due_reminder_gui(self):
+        """弹窗展示：即将到期（3天内）+ 已逾期 的图书"""
+        uid = self.current_user_id
+        due = get_due_soon_books(uid, days=3)
+        overdue = get_my_overdue_books(uid)
+
+        if not due and not overdue:
+            messagebox.showinfo("🔔 到期提醒", "✅ 太棒了！当前没有即将到期或已逾期的图书")
+            return
+
+        lines = []
+        if overdue:
+            lines.append("🔴 已逾期（请尽快归还，逾期每天罚款 0.5 元）：")
+            for it in overdue:
+                lines.append(f"   · 《{it['title']}》已逾期 {it['overdue_days']} 天，"
+                             f"预计罚款 {it['current_penalty']} 元")
+            lines.append("")
+        if due:
+            lines.append("🟡 即将到期（剩余 3 天内）：")
+            for it in due:
+                lines.append(f"   · 《{it['title']}》剩余约 {it['remain_days']} 天 "
+                             f"（截止 {it['deadline'][:16]}）")
+        messagebox.showwarning("🔔 借阅到期提醒", "\n".join(lines))
+
+    def auto_check_due(self):
+        """登录进入主界面后自动检查一次，有情况才弹窗"""
+        try:
+            uid = self.current_user_id
+            if not uid:
+                return
+            due = get_due_soon_books(uid, days=3)
+            overdue = get_my_overdue_books(uid)
+            if not due and not overdue:
+                return
+            msg = f"你有 {len(due)} 本图书将在 3 天内到期，{len(overdue)} 本已逾期。\n是否查看详情？"
+            if messagebox.askyesno("📢 借阅提醒", msg):
+                self.show_due_reminder_gui()
+        except Exception as e:
+            print("自动到期检查异常：", e)
 
     # ========== 3. 个人中心标签页 ==========
     def init_personal_tab(self):
@@ -631,14 +773,29 @@ class LibraryApp:
 
     # ========== 4. 统计报表标签页 ==========
     def init_stats_tab(self):
-        frame = tk.Frame(self.tab_stats, bg=BG, padx=20, pady=16)
+        frame = tk.Frame(self.tab_stats, bg=BG, padx=20, pady=12)
         frame.pack(fill="both", expand=True)
 
-        self._label(frame, "📊 图书统计仪表盘", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 4))
+        self._label(frame, "📊 图书统计仪表盘", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 2))
         self.dash_label = self._label(frame, "", justify="left")
-        self.dash_label.pack(anchor="w", pady=4)
+        self.dash_label.pack(anchor="w", pady=2)
 
-        self._label(frame, "🔥 热门借阅排行榜", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(14, 4))
+        # ---- 可视化图表区（纯 Canvas 绘制，无第三方依赖） ----
+        self._label(frame, "📈 数据可视化", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
+        chart_row = tk.Frame(frame, bg=BG)
+        chart_row.pack(anchor="w")
+
+        pie_wrap = tk.Frame(chart_row, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
+        pie_wrap.pack(side="left")
+        self.pie_canvas = tk.Canvas(pie_wrap, width=440, height=188, bg=PANEL, highlightthickness=0)
+        self.pie_canvas.pack(padx=4, pady=4)
+
+        bar_wrap = tk.Frame(chart_row, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
+        bar_wrap.pack(side="left", padx=(10, 0))
+        self.bar_canvas = tk.Canvas(bar_wrap, width=500, height=188, bg=PANEL, highlightthickness=0)
+        self.bar_canvas.pack(padx=4, pady=4)
+
+        self._label(frame, "🔥 热门借阅排行榜", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
         rank_frame = tk.Frame(frame, bg=BG)
         rank_frame.pack(anchor="w")
         self._label(rank_frame, "Top").grid(row=0, column=0)
@@ -646,19 +803,101 @@ class LibraryApp:
         self.entry_rank_num.insert(0, "5")
         self.entry_rank_num.grid(row=0, column=1, padx=5)
         self._btn(rank_frame, "查询", self.show_rank).grid(row=0, column=2, padx=5)
-        self.rank_text = tk.Text(frame, height=5, width=64, font=(FONT, 9), relief="solid", bd=1)
-        self.rank_text.pack(anchor="w", pady=4)
+        self.rank_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.rank_text.pack(anchor="w", pady=3)
 
-        self._label(frame, "📚 图书分类统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(12, 4))
-        self.cat_text = tk.Text(frame, height=5, width=64, font=(FONT, 9), relief="solid", bd=1)
-        self.cat_text.pack(anchor="w", pady=4)
+        self._label(frame, "📚 图书分类统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
+        self.cat_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.cat_text.pack(anchor="w", pady=3)
 
-        self._label(frame, "👤 我的借阅统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(12, 4))
+        self._label(frame, "👤 我的借阅统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
         self.my_stats_label = self._label(frame, "", justify="left")
-        self.my_stats_label.pack(anchor="w", pady=4)
+        self.my_stats_label.pack(anchor="w", pady=2)
 
-        self._btn(frame, "刷新全部统计", self.refresh_all_stats, primary=True).pack(pady=14)
+        self._btn(frame, "刷新全部统计", self.refresh_all_stats, primary=True).pack(pady=12)
         self.refresh_all_stats()
+
+    # ========== 统计可视化图表（纯 Canvas 绘制） ==========
+    def draw_category_pie(self):
+        """环形图：各分类图书数量占比"""
+        c = self.pie_canvas
+        c.delete("all")
+        stats = get_category_stat()
+        data = [(s["category"] or "未分类", s["total"]) for s in stats if s["total"] > 0]
+        total = sum(v for _, v in data)
+        if not data or total == 0:
+            c.create_text(220, 94, text="暂无图书数据", font=(FONT, 10), fill=MUTED)
+            return
+
+        cx, cy, r = 92, 94, 68
+        start = 90.0
+        for i, (label, val) in enumerate(data):
+            extent = -360.0 * val / total
+            c.create_arc(cx - r, cy - r, cx + r, cy + r, start=start, extent=extent,
+                         fill=CHART_COLORS[i % len(CHART_COLORS)], outline=PANEL, width=2,
+                         style="pieslice")
+            start += extent
+        # 中心镂空成环形
+        c.create_oval(cx - 36, cy - 36, cx + 36, cy + 36, fill=PANEL, outline="")
+        c.create_text(cx, cy - 6, text=str(total), font=(FONT, 14, "bold"), fill=TEXT)
+        c.create_text(cx, cy + 14, text="总藏书", font=(FONT, 8), fill=MUTED)
+
+        # 图例（两列排布）
+        for i, (label, val) in enumerate(data):
+            col = 176 + (i % 2) * 132
+            row = i // 2
+            y = 20 + row * 20
+            color = CHART_COLORS[i % len(CHART_COLORS)]
+            c.create_rectangle(col, y - 5, col + 10, y + 5, fill=color, outline="")
+            c.create_text(col + 15, y, anchor="w", font=(FONT, 7), fill=TEXT,
+                          text=f"{label[:4]} {val}本 {val * 100 // total}%")
+
+    def draw_stock_bar(self):
+        """堆叠柱状图：各分类在架 / 借出数量对比"""
+        c = self.bar_canvas
+        c.delete("all")
+        stats = get_category_stat()
+        if not stats:
+            c.create_text(250, 94, text="暂无图书数据", font=(FONT, 10), fill=MUTED)
+            return
+
+        left, bottom, top, right = 34, 150, 28, 476
+        max_v = max(s["total"] for s in stats) or 1
+        # 网格线与纵轴刻度
+        for k in range(1, 5):
+            y = bottom - (bottom - top) * k / 4
+            c.create_line(left, y, right, y, fill="#eef1f6")
+            c.create_text(left - 5, y, text=str(round(max_v * k / 4)), anchor="e",
+                          font=(FONT, 7), fill=MUTED)
+        c.create_line(left, top - 8, left, bottom, fill=LINE)
+        c.create_line(left, bottom, right, bottom, fill=LINE)
+
+        n = len(stats)
+        slot = (right - left) / max(n, 1)
+        bar_w = min(26, slot * 0.5)
+        for i, s in enumerate(stats):
+            cx = left + slot * (i + 0.5)
+            h_stock = (bottom - top) * s["in_stock"] / max_v
+            h_borrow = (bottom - top) * s["borrowed"] / max_v
+            # 在架（蓝，底部）
+            if h_stock > 0:
+                c.create_rectangle(cx - bar_w / 2, bottom - h_stock, cx + bar_w / 2, bottom,
+                                   fill=ACCENT, outline="")
+            # 借出（橙，堆叠在上）
+            if h_borrow > 0:
+                c.create_rectangle(cx - bar_w / 2, bottom - h_stock - h_borrow,
+                                   cx + bar_w / 2, bottom - h_stock, fill="#e67e22", outline="")
+            c.create_text(cx, bottom + 12, text=(s["category"] or "未分类")[:4],
+                          font=(FONT, 7), fill=MUTED)
+            if s["total"] > 0:
+                c.create_text(cx, bottom - h_stock - h_borrow - 8, text=str(s["total"]),
+                              font=(FONT, 7, "bold"), fill=TEXT)
+
+        # 图例
+        c.create_rectangle(right - 118, 10, right - 108, 20, fill=ACCENT, outline="")
+        c.create_text(right - 102, 15, text="在架", anchor="w", font=(FONT, 8), fill=TEXT)
+        c.create_rectangle(right - 62, 10, right - 52, 20, fill="#e67e22", outline="")
+        c.create_text(right - 46, 15, text="借出", anchor="w", font=(FONT, 8), fill=TEXT)
 
     def refresh_all_stats(self):
         dash = get_book_dashboard()
@@ -670,6 +909,10 @@ class LibraryApp:
             self.cat_text.insert(tk.END, "暂无图书数据")
         for c in cat_list:
             self.cat_text.insert(tk.END, f"{c['category']}：总计{c['total']}本 | 在架{c['in_stock']}本 | 借出{c['borrowed']}本\n")
+
+        # 刷新两张图表
+        self.draw_category_pie()
+        self.draw_stock_bar()
 
         self.show_rank()
         self.show_my_stats()

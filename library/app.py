@@ -15,6 +15,24 @@ def input_int(prompt, default=None):
         return None
 
 
+def show_due_reminder(uid, days=3):
+    """显示借阅到期提醒（逾期 + 即将到期）"""
+    overdue = get_my_overdue_books(uid)
+    due_soon = get_due_soon_books(uid, days)
+    if not overdue and not due_soon:
+        return
+    print("\n🔔 ==== 借阅提醒 ====")
+    if overdue:
+        print(f"⚠️ 你有 {len(overdue)} 本图书已逾期，请尽快归还！")
+        for item in overdue:
+            print(f"   《{item['title']}》 已逾期 {item['overdue_days']} 天，罚款 {item['current_penalty']} 元")
+    if due_soon:
+        print(f"⏰ 你有 {len(due_soon)} 本图书将在 {days} 天内到期：")
+        for item in due_soon:
+            print(f"   《{item['title']}》 剩余 {item['remain_days']} 天（截止 {item['deadline']}）")
+    print("====================")
+
+
 def show_menu():
     print("\n=====个人图书管理系统=====")
     print("1. 用户注册")
@@ -46,6 +64,7 @@ def show_menu():
     print("27. 我的借阅统计")
     print("28. 忘记密码（密保找回）")
     print("29. 查看全部用户（管理员）")
+    print("30. 借阅到期提醒")
     print("0. 退出程序")
     print("==========================")
 def _run_loop():
@@ -75,6 +94,7 @@ def _run_loop():
                 bal = get_balance(current_user_id)
                 role = "（管理员）" if is_admin(current_user_id) else ""
                 print(f"✅登录成功{role}，你的用户ID:{current_user_id}，当前余额：{bal}元")
+                show_due_reminder(current_user_id)
             else:
                 print("❌账号或密码错误")
         elif opt == "3":
@@ -445,6 +465,24 @@ def _run_loop():
             for u in users:
                 role = "管理员" if u[3] == 1 else "普通用户"
                 print(f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元  【{role}】")
+        elif opt == "30":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            overdue = get_my_overdue_books(current_user_id)
+            due_soon = get_due_soon_books(current_user_id, 3)
+            print("\n==== 🔔 借阅到期提醒 ====")
+            if not overdue and not due_soon:
+                print("✅ 你没有逾期或即将到期的图书")
+            else:
+                if overdue:
+                    print(f"⚠️ 已逾期 {len(overdue)} 本：")
+                    for item in overdue:
+                        print(f"   《{item['title']}》 已逾期 {item['overdue_days']} 天，罚款 {item['current_penalty']} 元")
+                if due_soon:
+                    print(f"⏰ 3 天内到期 {len(due_soon)} 本：")
+                    for item in due_soon:
+                        print(f"   《{item['title']}》 剩余 {item['remain_days']} 天（截止 {item['deadline']}）")
         elif opt == "0":
             print("👋程序退出")
             break

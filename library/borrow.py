@@ -215,5 +215,40 @@ def renew_book(user_id, book_id, add_days=7):
     conn.close()
     return new_deadline_str
 
+# ========== 借阅到期提醒 ==========
+def get_due_soon_books(user_id, days=3):
+    """
+    查询即将到期（days 天内）且未逾期、未归还的图书
+    :param user_id: 用户ID
+    :param days: 提前提醒天数，默认3天
+    :return: list[dict]，含书名、截止时间、剩余天数
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    limit_str = (now + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute('''
+        SELECT br.id, b.title, br.return_deadline
+        FROM borrow_record br
+        LEFT JOIN book b ON br.book_id = b.id
+        WHERE br.user_id = ? AND br.return_time IS NULL
+          AND br.return_deadline >= ? AND br.return_deadline <= ?
+        ORDER BY br.return_deadline
+    ''', (user_id, now_str, limit_str))
+    rows = cur.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        remain = datetime.strptime(r[2], "%Y-%m-%d %H:%M:%S") - now
+        result.append({
+            "record_id": r[0],
+            "title": r[1],
+            "deadline": r[2],
+            "remain_days": round(remain.total_seconds() / 86400, 1),
+        })
+    return result
+
+
 if __name__ == "__main__":
     print("borrow模块加载完成")
