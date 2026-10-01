@@ -3,6 +3,9 @@ import os
 import csv
 from datetime import datetime, timedelta
 
+from rules import check_borrow_permission
+from reservation import has_priority_holder, on_book_borrowed, on_book_returned
+
 def get_conn():
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
     conn = sqlite3.connect(db_path)
@@ -13,16 +16,38 @@ def borrow_book(user_id, book_id):
     """借阅图书
     :param user_id: 用户编号
     :param book_id: 图书编号
-    :return: True成功；False失败（图书已借出）
+    :return: True成功；False失败（图书已借出 / 不满足借阅规则）
+    """
+    ok, _ = borrow_book_ex(user_id, book_id)
+    return ok
+
+
+def borrow_book_ex(user_id, book_id):
+    """借阅图书（带借阅规则校验与预约优先权），返回可展示的原因
+    :return: (ok: bool, msg: str)
     """
     conn = get_conn()
     cur = conn.cursor()
-    # 判断图书是否已经借出
-    cur.execute("SELECT is_borrow FROM book WHERE id=?", (book_id,))
+    cur.execute("SELECT title, is_borrow FROM book WHERE id=?", (book_id,))
     res = cur.fetchone()
-    if not res or res[0] == 1:
-        conn.close()
-        return False
+    conn.close()
+    if not res:
+        return False, "图书不存在"
+    title, is_borrow = res
+    if is_borrow == 1:
+        return False, f"《{title}》已被借出，你可以预约排队"
+
+    # 借阅规则校验：逾期未还 / 欠费超限 / 超过借阅上限
+    allowed, reason = check_borrow_permission(user_id)
+    if not allowed:
+        return False, reason
+
+    # 预约优先权：已有其他读者预约到书时，不能抢借
+    if has_priority_holder(book_id, user_id):
+        return False, f"《{title}》已被其他读者预约到书，请等待其取书"
+
+    conn = get_conn()
+    cur = conn.cursor()
     now = datetime.now()
     borrow_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
     # 借阅期限7天，算出归还截止时间
@@ -30,14 +55,17 @@ def borrow_book(user_id, book_id):
     deadline_str = deadline.strftime("%Y-%m-%d %H:%M:%S")
     # 修改图书状态为已借出
     cur.execute("UPDATE book SET is_borrow=1 WHERE id=?", (book_id,))
-    # 新增借阅记录，存入 borrow_time、return_deadline，return_time、penalty初始为NULL/0
+    # 新增借阅记录
     cur.execute('''
         INSERT INTO borrow_record(user_id, book_id, borrow_time, return_deadline, return_time, penalty)
         VALUES (?, ?, ?, ?, NULL, 0)
     ''', (user_id, book_id, borrow_time_str, deadline_str))
     conn.commit()
     conn.close()
-    return True
+
+    # 若自己有该书的预约，标记为已借到
+    on_book_borrowed(user_id, book_id)
+    return True, f"借阅成功！《{title}》借期 7 天，请于 {deadline_str[:16]} 前归还"
 
 def return_book(user_id, book_id):
     """归还图书；超时自动计算罚款，每天0.5元
@@ -77,6 +105,8 @@ def return_book(user_id, book_id):
     ''', (now_str, penalty, book_id, user_id))
     conn.commit()
     conn.close()
+    # 归还后推进预约队列：队首 waiting 自动变为 ready（到书通知）
+    on_book_returned(book_id)
     return penalty
 
 def get_borrow_record(user_id):

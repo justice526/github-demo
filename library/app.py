@@ -2,6 +2,9 @@ from book import *
 from user import *
 from borrow import *
 from rating import *
+from rules import *
+from reservation import *
+from report import export_html_report
 from db import init_db
 
 
@@ -69,6 +72,11 @@ def show_menu():
     print("31. 图书评分/评论")
     print("32. 好评排行榜")
     print("33. 导出借阅记录CSV")
+    print("34. 预约图书")
+    print("35. 我的预约/取消预约")
+    print("36. 查看我的借阅额度")
+    print("37. 借阅规则设置（管理员）")
+    print("38. 导出HTML统计报告")
     print("0. 退出程序")
     print("==========================")
 def _run_loop():
@@ -154,11 +162,11 @@ def _run_loop():
             if bid is None:
                 print("❌请输入有效的图书ID（数字）！")
                 continue
-            res = borrow_book(current_user_id, bid)
+            res, msg = borrow_book_ex(current_user_id, bid)
             if res:
-                print("✅借阅成功")
+                print(f"✅{msg}")
             else:
-                print("❌借阅失败，图书不存在或已经借出")
+                print(f"❌{msg}")
         # 归还图书
         elif opt == "8":
             if not current_user_id:
@@ -171,6 +179,10 @@ def _run_loop():
             res = return_book(current_user_id, bid)
             if res is not False:
                 print(f"归还成功，罚款：{res}元")
+                queue = get_book_queue(bid)
+                ready_ones = [q for q in queue if q[2] == "已到书"]
+                if ready_ones:
+                    print(f"📢 已通知预约者「{ready_ones[0][0]}」前来取书")
             else:
                 print("归还失败，没有这条借阅记录")
         elif opt == "9":
@@ -531,6 +543,77 @@ def _run_loop():
                 print(f"✅ 导出成功：{path}")
             else:
                 print("❌ 导出失败")
+        elif opt == "34":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            bid = input_int("要预约的图书ID：")
+            if bid is None:
+                print("❌请输入有效的图书ID（数字）！")
+                continue
+            ok, msg = reserve_book(current_user_id, bid)
+            print(("✅" if ok else "❌") + msg)
+        elif opt == "35":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            rows = get_my_reservations(current_user_id)
+            print("\n==== 我的预约 ====")
+            if not rows:
+                print("暂无排队中的预约")
+                continue
+            for r in rows:
+                print(f"《{r[2]}》 状态：{r[4]}　{r[6]}　预约于 {r[3]}")
+            cancel = input("要取消某本书的预约吗？输入图书ID（直接回车跳过）：").strip()
+            if cancel:
+                try:
+                    cancel_id = int(cancel)
+                except ValueError:
+                    print("❌图书ID必须是数字")
+                    continue
+                ok, msg = cancel_reservation(current_user_id, cancel_id)
+                print(("✅" if ok else "❌") + msg)
+        elif opt == "36":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            s = get_borrow_summary(current_user_id)
+            print("\n==== 我的借阅额度 ====")
+            print(f"在借：{s['borrowed']} 本 / 上限 {s['limit']} 本")
+            print(f"剩余可借：{s['remaining']} 本")
+            print(f"逾期未还：{s['overdue']} 本")
+            print(f"未结清罚款：{s['unpaid_fine']} 元（达 {s['fine_threshold']} 元暂停借阅）")
+            allowed, reason = check_borrow_permission(current_user_id)
+            print("当前借阅资格：" + ("✅ 正常" if allowed else f"⛔ 已暂停（{reason}）"))
+            print(get_borrow_rule_text())
+        elif opt == "37":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            if not is_admin(current_user_id):
+                print("❌该功能仅管理员可用！")
+                continue
+            print("\n==== 借阅规则设置 ====")
+            print(f"当前：每人最多借 {get_borrow_limit()} 本；欠费达 {get_fine_threshold()} 元暂停借阅")
+            n = input_int("新的借阅上限（直接回车保持不变）：")
+            if n is not None:
+                print("✅已更新" if set_borrow_limit(n) else "❌必须是大于 0 的整数")
+            t = input("新的欠费阈值（元，直接回车保持不变）：").strip()
+            if t:
+                try:
+                    print("✅已更新" if set_fine_threshold(float(t)) else "❌必须是不小于 0 的数字")
+                except ValueError:
+                    print("❌请输入数字")
+        elif opt == "38":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            path = input("报告文件名（默认 library_report.html）：").strip() or "library_report.html"
+            if export_html_report(path, user_id=current_user_id):
+                print(f"✅统计报告已生成：{path}")
+                print("   用浏览器打开即可查看，也可「打印 → 另存为 PDF」存档")
+            else:
+                print("❌报告生成失败")
         elif opt == "0":
             print("👋程序退出")
             break
@@ -541,6 +624,8 @@ def _run_loop():
 def main():
     init_db()
     init_rating_table()
+    init_rules_table()
+    init_reservation_table()
     try:
         _run_loop()
     except (KeyboardInterrupt, EOFError):

@@ -4,6 +4,9 @@ from book import *
 from user import *
 from borrow import *
 from rating import *
+from rules import *
+from reservation import *
+from report import build_html, export_html_report
 from db import init_db
 
 # ===== 浅色主题配色 =====
@@ -198,8 +201,9 @@ class LibraryApp:
         self.init_personal_tab()
         self.init_stats_tab()
         self.update_user_info()
-        # 登录后延迟自动检查借阅到期情况
+        # 登录后延迟自动检查借阅到期情况与预约到书提醒
         self.root.after(400, self.auto_check_due)
+        self.root.after(700, self.auto_check_ready_reservation)
 
     def update_user_info(self):
         bal = get_balance(self.current_user_id)
@@ -589,6 +593,15 @@ class LibraryApp:
         self._btn(top, "刷新我的借阅", self.refresh_my_borrow).grid(row=0, column=8, padx=8)
         self._btn(top, "🔔 到期提醒", self.show_due_reminder_gui, bg="#e67e22").grid(row=0, column=9, padx=8)
 
+        # 第二行：预约相关操作 + 借阅额度状态
+        row2 = tk.Frame(self.tab_borrow, bg=BG, padx=10)
+        row2.pack(fill="x", pady=(0, 4))
+        self._btn(row2, "📌 预约图书", self.reserve_book_gui, primary=True).pack(side="left", padx=(0, 6))
+        self._btn(row2, "我的预约", self.show_my_reservations_gui).pack(side="left", padx=6)
+        self._btn(row2, "查看预约队列", self.show_book_queue_gui).pack(side="left", padx=6)
+        self.quota_label = self._label(row2, "", size=9, fg=MUTED)
+        self.quota_label.pack(side="right", padx=8)
+
         columns = ("id", "title", "borrow_time", "deadline", "return_time", "penalty")
         self.borrow_tree = ttk.Treeview(self.tab_borrow, columns=columns, show="headings")
         for col, txt, w, anchor in [("id", "记录ID", 70, "center"), ("title", "书名", 160, None),
@@ -610,6 +623,19 @@ class LibraryApp:
         records = get_borrow_record(self.current_user_id)
         for r in records:
             self.borrow_tree.insert("", "end", values=(r[0], r[1], r[2], r[3], r[4] if r[4] else "未归还", r[5]))
+        self.refresh_quota()
+
+    def refresh_quota(self):
+        """刷新「借阅额度」状态条，异常状态用红色提示"""
+        try:
+            s = get_borrow_summary(self.current_user_id)
+        except Exception as e:
+            print("刷新额度异常：", e)
+            return
+        txt = (f"借阅额度 {s['borrowed']}/{s['limit']} 本　剩余 {s['remaining']} 本　"
+               f"逾期 {s['overdue']} 本　欠费 {s['unpaid_fine']} 元")
+        warn = s["overdue"] > 0 or (s["fine_threshold"] > 0 and s["unpaid_fine"] >= s["fine_threshold"])
+        self.quota_label.config(text=txt, fg=DANGER if warn else MUTED)
 
     def _parse_bid(self, raw):
         if not raw:
@@ -625,12 +651,13 @@ class LibraryApp:
         bid = self._parse_bid(self.entry_br_bid.get().strip())
         if bid is None:
             return
-        if borrow_book(self.current_user_id, bid):
-            messagebox.showinfo("成功", "借阅成功，借阅期限7天")
+        ok, msg = borrow_book_ex(self.current_user_id, bid)
+        if ok:
+            messagebox.showinfo("成功", msg)
             self.refresh_my_borrow()
             self.refresh_book_list()
         else:
-            messagebox.showerror("错误", "借阅失败，图书不存在或已借出")
+            messagebox.showwarning("借阅失败", msg)
 
     def return_book_gui(self):
         bid = self._parse_bid(self.entry_br_bid.get().strip())
@@ -638,12 +665,57 @@ class LibraryApp:
             return
         res = return_book(self.current_user_id, bid)
         if res is not False:
-            messagebox.showinfo("成功", f"归还成功\n产生罚款：{res} 元")
+            msg = f"归还成功\n产生罚款：{res} 元"
+            # 归还后队列已自动推进，这里告知前台预约者已被通知
+            queue = get_book_queue(bid)
+            ready_ones = [q for q in queue if q[2] == "已到书"]
+            if ready_ones:
+                msg += f"\n\n📢 已通知预约者「{ready_ones[0][0]}」前来取书"
+            messagebox.showinfo("成功", msg)
             self.refresh_my_borrow()
             self.refresh_book_list()
             self.update_user_info()
         else:
             messagebox.showerror("错误", "归还失败，无对应借阅记录")
+
+    # ========== 预约相关操作 ==========
+    def reserve_book_gui(self):
+        """预约一本已被借出的图书（复用「图书ID」输入框）"""
+        bid = self._parse_bid(self.entry_br_bid.get().strip())
+        if bid is None:
+            return
+        ok, msg = reserve_book(self.current_user_id, bid)
+        if ok:
+            messagebox.showinfo("预约成功", msg)
+            self.refresh_quota()
+        else:
+            messagebox.showwarning("无法预约", msg)
+
+    def show_my_reservations_gui(self):
+        """我的预约列表"""
+        rows = get_my_reservations(self.current_user_id)
+        if not rows:
+            messagebox.showinfo("我的预约", "你当前没有排队中的预约")
+            return
+        lines = [f"《{r[2]}》\n    状态：{r[4]}　{r[6]}　预约于 {r[3][:16]}"
+                 for r in rows]
+        messagebox.showinfo(f"我的预约（{len(rows)} 条）", "\n\n".join(lines))
+
+    def show_book_queue_gui(self):
+        """查看某本书的预约队列"""
+        bid = self._parse_bid(self.entry_br_bid.get().strip())
+        if bid is None:
+            return
+        book = get_book_by_id(bid)
+        if not book:
+            messagebox.showerror("错误", "图书不存在")
+            return
+        queue = get_book_queue(bid)
+        if not queue:
+            messagebox.showinfo("预约队列", f"《{book[1]}》当前没有人预约")
+            return
+        lines = [f"{i}. {u}　{st}　（预约于 {t[:16]}）" for u, t, st, i in queue]
+        messagebox.showinfo(f"《{book[1]}》预约队列（{len(queue)} 人）", "\n".join(lines))
 
     def renew_book_gui(self):
         bid = self._parse_bid(self.entry_br_bid.get().strip())
@@ -716,6 +788,21 @@ class LibraryApp:
         except Exception as e:
             print("自动到期检查异常：", e)
 
+    def auto_check_ready_reservation(self):
+        """登录后检查「预约到书」，有则提示尽快借阅"""
+        try:
+            uid = self.current_user_id
+            if not uid:
+                return
+            ready = get_ready_for_user(uid)
+            if not ready:
+                return
+            lines = [f"· 《{t}》到书时间：{(nt or '')[:16]}" for bid, t, nt in ready]
+            messagebox.showinfo("📚 预约到书提醒",
+                                f"你有 {len(ready)} 本预约图书已到馆，请及时借阅：\n\n" + "\n".join(lines))
+        except Exception as e:
+            print("预约到书检查异常：", e)
+
     # ========== 3. 个人中心标签页 ==========
     def init_personal_tab(self):
         frame = tk.Frame(self.tab_personal, bg=BG, padx=24, pady=20)
@@ -757,6 +844,7 @@ class LibraryApp:
         # 管理员功能
         section(10, "👑 管理员功能")
         self._btn(frame, "查看全部用户", self.show_all_users_gui).grid(row=11, column=0, padx=5, pady=5)
+        self._btn(frame, "借阅规则设置", self.show_rule_settings_gui).grid(row=11, column=1, padx=5, pady=5)
 
         # 注销
         self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=12, column=0, columnspan=3, pady=(24, 0))
@@ -859,6 +947,96 @@ class LibraryApp:
         lines = [f"ID:{u[0]}  用户名:{u[1]}  余额:{u[2]}元  【{'管理员' if u[3] == 1 else '普通用户'}】" for u in users]
         messagebox.showinfo("全部用户（管理员）", "\n".join(lines))
 
+    def _current_username(self):
+        """取当前登录用户的用户名"""
+        try:
+            for u in get_all_users():
+                if u[0] == self.current_user_id:
+                    return u[1]
+        except Exception as e:
+            print("获取用户名异常：", e)
+        return f"用户#{self.current_user_id}"
+
+    def export_report_gui(self):
+        """导出可打印的 HTML 统计报告"""
+        path = filedialog.asksaveasfilename(
+            title="导出统计报告",
+            defaultextension=".html",
+            initialfile="library_report.html",
+            filetypes=[("HTML 文件", "*.html"), ("所有文件", "*.*")]
+        )
+        if not path:
+            return
+        if export_html_report(path, user_id=self.current_user_id,
+                              operator=self._current_username()):
+            messagebox.showinfo("成功",
+                                f"统计报告已生成：\n{path}\n\n"
+                                f"用浏览器打开即可查看，也可「打印 → 另存为 PDF」存档。")
+        else:
+            messagebox.showerror("错误", "报告生成失败")
+
+    def show_rule_settings_gui(self):
+        """管理员维护借阅规则参数（借阅上限 / 欠费暂停阈值）"""
+        if not is_admin(self.current_user_id):
+            messagebox.showwarning("权限不足", "该功能仅管理员可用")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("借阅规则设置")
+        win.configure(bg=BG)
+        win.geometry("430x310")
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        f = tk.Frame(win, bg=BG, padx=22, pady=18)
+        f.pack(fill="both", expand=True)
+
+        self._label(f, "⚙ 借阅规则设置", size=12, bold=True, fg=ACCENT).grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
+        self._label(f, "每人最多借阅：").grid(row=1, column=0, sticky="e", pady=6)
+        e_limit = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1)
+        e_limit.insert(0, str(get_borrow_limit()))
+        e_limit.grid(row=1, column=1, sticky="w", pady=6, padx=6)
+        self._label(f, "本", size=9, fg=MUTED).grid(row=1, column=2, sticky="w")
+
+        self._label(f, "欠费暂停阈值：").grid(row=2, column=0, sticky="e", pady=6)
+        e_thr = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1)
+        e_thr.insert(0, str(get_fine_threshold()))
+        e_thr.grid(row=2, column=1, sticky="w", pady=6, padx=6)
+        self._label(f, "元", size=9, fg=MUTED).grid(row=2, column=2, sticky="w")
+
+        self._label(f,
+                    "· 有逾期未还图书时，一律暂停借阅\n"
+                    "· 未结清罚款达到阈值时，暂停借阅\n"
+                    "· 预约不受借阅上限限制\n"
+                    "· 修改后立即生效",
+                    size=9, fg=MUTED, justify="left").grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
+
+        def reset_default():
+            e_limit.delete(0, tk.END)
+            e_limit.insert(0, str(DEFAULT_BORROW_LIMIT))
+            e_thr.delete(0, tk.END)
+            e_thr.insert(0, str(DEFAULT_FINE_THRESHOLD))
+
+        def save():
+            if not set_borrow_limit(e_limit.get().strip()):
+                messagebox.showerror("错误", "借阅上限必须是大于 0 的整数", parent=win)
+                return
+            if not set_fine_threshold(e_thr.get().strip()):
+                messagebox.showerror("错误", "欠费阈值必须是不小于 0 的数字", parent=win)
+                return
+            messagebox.showinfo("成功", "规则已保存并立即生效", parent=win)
+            win.destroy()
+            self.refresh_quota()
+
+        btns = tk.Frame(f, bg=BG)
+        btns.grid(row=4, column=0, columnspan=3, pady=18)
+        self._btn(btns, "保存设置", save, primary=True, width=10).pack(side="left", padx=6)
+        self._btn(btns, "恢复默认", reset_default, width=10).pack(side="left", padx=6)
+        self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=6)
+
     def logout_gui(self):
         if messagebox.askyesno("确认", "确定注销登录？"):
             self.current_user_id = None
@@ -913,7 +1091,10 @@ class LibraryApp:
         self.my_stats_label = self._label(frame, "", justify="left")
         self.my_stats_label.pack(anchor="w", pady=2)
 
-        self._btn(frame, "刷新全部统计", self.refresh_all_stats, primary=True).pack(pady=12)
+        btn_row = tk.Frame(frame, bg=BG)
+        btn_row.pack(pady=12)
+        self._btn(btn_row, "刷新全部统计", self.refresh_all_stats, primary=True).pack(side="left", padx=6)
+        self._btn(btn_row, "📄 导出HTML报告", self.export_report_gui, bg=SUCCESS).pack(side="left", padx=6)
         self.refresh_all_stats()
 
     # ========== 统计可视化图表（纯 Canvas 绘制） ==========
@@ -1099,6 +1280,7 @@ class LibraryApp:
             ("分类", category or "未分类"),
             ("当前状态", status + (f"（借阅人：{borrower}）" if borrower else "")),
             ("历史借阅", f"{get_book_borrow_count(bid)} 次"),
+            ("预约排队", f"{get_reservation_count(bid)} 人"),
         ]
         for i, (k, v) in enumerate(info_rows):
             self._label(info, k + "：", size=9, fg=MUTED).grid(row=i, column=0, sticky="e", pady=1)
@@ -1157,13 +1339,14 @@ class LibraryApp:
         btns.pack(anchor="w")
 
         def do_borrow():
-            if borrow_book(self.current_user_id, bid):
-                messagebox.showinfo("成功", "借阅成功，借期 7 天", parent=win)
+            ok, msg = borrow_book_ex(self.current_user_id, bid)
+            if ok:
+                messagebox.showinfo("成功", msg, parent=win)
                 win.destroy()
                 self.refresh_book_list()
                 self.refresh_my_borrow()
             else:
-                messagebox.showerror("错误", "借阅失败，图书不存在或已被借出", parent=win)
+                messagebox.showwarning("借阅失败", msg, parent=win)
 
         def do_return():
             res = return_book(self.current_user_id, bid)
@@ -1176,11 +1359,38 @@ class LibraryApp:
             else:
                 messagebox.showerror("错误", "归还失败，你没有这本书的未归还记录", parent=win)
 
+        def do_reserve():
+            ok, msg = reserve_book(self.current_user_id, bid)
+            if ok:
+                messagebox.showinfo("预约成功", msg, parent=win)
+                win.destroy()
+                self.refresh_quota()
+            else:
+                messagebox.showwarning("无法预约", msg, parent=win)
+
+        def do_cancel_res():
+            ok, msg = cancel_reservation(self.current_user_id, bid)
+            if ok:
+                messagebox.showinfo("已取消", msg, parent=win)
+                win.destroy()
+                self.refresh_quota()
+            else:
+                messagebox.showwarning("提示", msg, parent=win)
+
         self._btn(btns, "借阅本书", do_borrow, primary=True).pack(side="left", padx=3)
         btn_ret = self._btn(btns, "归还本书", do_return, bg=SUCCESS)
         btn_ret.pack(side="left", padx=3)
         if get_my_current_borrow(self.current_user_id, bid) is None:
             btn_ret.config(state="disabled")
+
+        # 预约按钮：已借出且我未预约 → 可预约；我已预约 → 可取消
+        my_pos = get_my_queue_position(self.current_user_id, bid)
+        if my_pos is None and is_borrow == 1:
+            self._btn(btns, "📌 预约本书", do_reserve, bg="#e67e22").pack(side="left", padx=3)
+        elif my_pos is not None:
+            pos_txt = "已到书可借" if my_pos == 0 else f"排第 {my_pos} 位"
+            self._btn(btns, f"取消预约（{pos_txt}）", do_cancel_res).pack(side="left", padx=3)
+
         self._btn(btns, "关闭", win.destroy).pack(side="left", padx=3)
 
     # ========== 高级组合搜索窗口 ==========
@@ -1261,6 +1471,8 @@ class LibraryApp:
 def run():
     init_db()
     init_rating_table()
+    init_rules_table()
+    init_reservation_table()
     root = tk.Tk()
     app = LibraryApp(root)
     root.mainloop()
