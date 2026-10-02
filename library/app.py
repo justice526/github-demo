@@ -5,6 +5,8 @@ from rating import *
 from rules import *
 from reservation import *
 from report import export_html_report
+from tag import *
+from log import init_log_table, get_logs, get_action_stats, action_text, clear_logs
 from db import init_db
 
 
@@ -77,6 +79,9 @@ def show_menu():
     print("36. 查看我的借阅额度")
     print("37. 借阅规则设置（管理员）")
     print("38. 导出HTML统计报告")
+    print("39. 按标签筛选图书")
+    print("40. 管理图书标签")
+    print("41. 查看操作日志（管理员）")
     print("0. 退出程序")
     print("==========================")
 def _run_loop():
@@ -614,6 +619,52 @@ def _run_loop():
                 print("   用浏览器打开即可查看，也可「打印 → 另存为 PDF」存档")
             else:
                 print("❌报告生成失败")
+        elif opt == "39":
+            all_tags = get_all_tags()
+            if not all_tags:
+                print("还没有任何标签，可用「40. 管理图书标签」添加")
+                continue
+            print("\n==== 现有标签 ====")
+            for name, cnt in all_tags:
+                print(f"  {name}（{cnt} 本）")
+            raw = input("输入标签（多个用逗号分隔，留空=查看全部）：").strip()
+            names = parse_tag_input(raw)
+            if not names:
+                print("未输入标签，显示全部图书")
+            mode = input("匹配方式 1=包含任一 2=必须全部（默认1）：").strip()
+            match_all = mode == "2"
+            books = get_books_by_tags(names, match_all=match_all)
+            print(f"\n==== 筛选结果：{len(books)} 本 ====")
+            for b in books:
+                print(f"  #{b[0]} 《{b[1]}》 - {b[2]} [{b[3]}]")
+        elif opt == "40":
+            book = get_book_by_id(input_int("要为哪本图书设置标签（图书ID）：") or 0)
+            if not book:
+                print("❌图书不存在或ID无效")
+                continue
+            cur_tags = get_book_tags(book[0])
+            print(f"《{book[1]}》当前标签：{'、'.join(cur_tags) if cur_tags else '（无）'}")
+            raw = input("新的标签（逗号分隔，留空=清空全部标签）：").strip()
+            ok, tags, msg = set_book_tags(book[0], raw)
+            print(("✅" if ok else "❌") + (f"标签已保存：{'、'.join(tags)}" if ok and tags
+                                            else ("标签已清空" if ok else msg)))
+        elif opt == "41":
+            if not current_user_id:
+                print("⚠请先登录！")
+                continue
+            if not is_admin(current_user_id):
+                print("❌该功能仅管理员可用！")
+                continue
+            stats = get_action_stats()
+            print(f"\n==== 操作日志统计（共 {sum(c for _a, _n, c in stats)} 条） ====")
+            for _code, name, cnt in stats:
+                print(f"  {name}：{cnt} 次")
+            rows = get_logs(limit=20)
+            print("\n---- 最近 20 条 ----")
+            for r in rows:
+                print(f"  [{r[5]}] {r[1] or '—'} {action_text(r[2])} {r[3]} {r[4]}")
+            if input("是否清空全部日志？输入 y 确认：").strip().lower() == "y":
+                print(f"✅已清空 {clear_logs()} 条日志")
         elif opt == "0":
             print("👋程序退出")
             break
@@ -626,6 +677,8 @@ def main():
     init_rating_table()
     init_rules_table()
     init_reservation_table()
+    init_tag_table()
+    init_log_table()
     try:
         _run_loop()
     except (KeyboardInterrupt, EOFError):

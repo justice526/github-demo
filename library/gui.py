@@ -1,4 +1,5 @@
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from book import *
 from user import *
@@ -7,6 +8,8 @@ from rating import *
 from rules import *
 from reservation import *
 from report import build_html, export_html_report
+from tag import *
+from log import get_logs, get_action_stats, clear_logs, action_text, get_log_count
 from db import init_db
 
 # ===== 浅色主题配色 =====
@@ -229,6 +232,7 @@ class LibraryApp:
         actions = [("🔍 高级搜索", self.advanced_search_gui, True), ("添加图书", self.add_book_gui, False),
                    ("修改图书", self.update_book_gui, False), ("删除图书", self.delete_book_gui, False),
                    ("关键词搜索", self.search_book_gui, False), ("按分类筛选", self.filter_by_category_gui, False),
+                   ("🏷 标签筛选", self.filter_by_tags_gui, False),
                    ("图书详情", self.open_selected_detail, False), ("批量导入图书", self.batch_import_book_gui, False),
                    ("恢复备份", self.restore_backup_gui, False), ("刷新全部", self.refresh_book_list, False)]
         for i, (text, cmd, primary) in enumerate(actions):
@@ -845,9 +849,11 @@ class LibraryApp:
         section(10, "👑 管理员功能")
         self._btn(frame, "查看全部用户", self.show_all_users_gui).grid(row=11, column=0, padx=5, pady=5)
         self._btn(frame, "借阅规则设置", self.show_rule_settings_gui).grid(row=11, column=1, padx=5, pady=5)
+        self._btn(frame, "📋 操作日志", self.show_operation_logs_gui).grid(row=12, column=0, padx=5, pady=5)
+        self._btn(frame, "🏷 标签管理", self.show_tag_manager_gui).grid(row=12, column=1, padx=5, pady=5)
 
         # 注销
-        self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=12, column=0, columnspan=3, pady=(24, 0))
+        self._btn(frame, "注销登录", self.logout_gui, bg=DANGER).grid(row=13, column=0, columnspan=3, pady=(24, 0))
 
     def recharge_gui(self):
         money = self.entry_recharge.get().strip()
@@ -1036,6 +1042,148 @@ class LibraryApp:
         self._btn(btns, "保存设置", save, primary=True, width=10).pack(side="left", padx=6)
         self._btn(btns, "恢复默认", reset_default, width=10).pack(side="left", padx=6)
         self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=6)
+
+    # ========== 操作日志（管理员） ==========
+    def show_operation_logs_gui(self):
+        """查看系统操作日志"""
+        if not is_admin(self.current_user_id):
+            messagebox.showwarning("权限不足", "该功能仅管理员可用")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("系统操作日志")
+        win.configure(bg=BG)
+        win.geometry("820x560")
+        win.minsize(700, 460)
+        win.transient(self.root)
+
+        body = tk.Frame(win, bg=BG, padx=14, pady=12)
+        body.pack(fill="both", expand=True)
+
+        # 先定义回调（内部依赖下方创建的 tree / cb_action，闭包延迟取值）
+        def reload_logs():
+            for item in tree.get_children():
+                tree.delete(item)
+            sel = cb_action.get()
+            rows = get_logs(limit=500, action=None if sel == "全部" else sel)
+            for r in rows:
+                tree.insert("", "end", values=(r[5], r[1] or "—", action_text(r[2]), r[3], r[4]))
+            if not rows:
+                tree.insert("", "end", values=("", "—", "暂无记录", "", ""))
+
+        def clear_all():
+            if not messagebox.askyesno("确认", "确定清空全部操作日志？此操作不可恢复。"):
+                return
+            n = clear_logs()
+            messagebox.showinfo("成功", f"已清空 {n} 条日志")
+            win.destroy()
+            self.show_operation_logs_gui()
+
+        # 概览
+        stats = get_action_stats()
+        self._label(body, f"📋 操作日志　共 {get_log_count()} 条记录",
+                    size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 6))
+        if stats:
+            summary = "　".join(f"{name} {cnt}" for _code, name, cnt in stats[:6])
+            self._label(body, summary, size=9, fg=MUTED).pack(anchor="w", pady=(0, 8))
+        else:
+            self._label(body, "暂无任何操作记录", size=9, fg=MUTED).pack(anchor="w", pady=(0, 8))
+
+        # 过滤栏
+        bar = tk.Frame(body, bg=BG)
+        bar.pack(fill="x", pady=(0, 8))
+        self._label(bar, "动作筛选：").pack(side="left")
+        codes = ["全部"] + [c for c, _n, _c in stats]
+        cb_action = ttk.Combobox(bar, values=codes, width=12, state="readonly")
+        cb_action.set("全部")
+        cb_action.pack(side="left", padx=4)
+        self._btn(bar, "刷新", lambda: reload_logs()).pack(side="left", padx=6)
+        self._btn(bar, "清空日志", clear_all, bg=DANGER).pack(side="right", padx=4)
+
+        columns = ("time", "user", "action", "target", "detail")
+        tree = ttk.Treeview(body, columns=columns, show="headings")
+        for col, txt, w, anchor in [("time", "时间", 140, "center"), ("user", "操作人", 90, None),
+                                    ("action", "动作", 80, "center"), ("target", "对象", 200, None),
+                                    ("detail", "详情", 240, None)]:
+            tree.heading(col, text=txt)
+            tree.column(col, width=w, anchor=anchor or "w")
+        vscroll = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vscroll.set)
+        vscroll.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+
+        reload_logs()
+
+    # ========== 标签管理（管理员） ==========
+    def show_tag_manager_gui(self):
+        """查看与清理标签"""
+        if not is_admin(self.current_user_id):
+            messagebox.showwarning("权限不足", "该功能仅管理员可用")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("标签管理")
+        win.configure(bg=BG)
+        win.geometry("430x500")
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        f = tk.Frame(win, bg=BG, padx=20, pady=16)
+        f.pack(fill="both", expand=True)
+
+        stat = get_tag_stat()
+        self._label(f, "🏷 标签管理", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 4))
+        self._label(f, f"共 {stat['total']} 个标签　{stat['used']} 个在用　"
+                        f"{stat['tagged_books']} 本图书已打标签　{stat['links']} 条关联",
+                    size=9, fg=MUTED).pack(anchor="w", pady=(0, 10))
+
+        all_tags = get_all_tags()
+        if not all_tags:
+            self._label(f, "还没有任何标签。\n\n双击图书列表中的图书，\n在详情窗口点「编辑」即可添加。",
+                        size=10, fg=MUTED, justify="left").pack(anchor="w", pady=16)
+            self._btn(f, "关闭", win.destroy, width=10).pack(anchor="e")
+            return
+
+        names = [n for n, _c in all_tags]
+        listbox = tk.Listbox(f, width=34, height=16, font=(FONT, 10), relief="solid", bd=1)
+        for name, cnt in all_tags:
+            listbox.insert(tk.END, f"{name}    ·  {cnt} 本")
+        listbox.pack(fill="both", expand=True, pady=(0, 10))
+
+        def do_delete():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("提示", "请先选择要删除的标签", parent=win)
+                return
+            name = names[sel[0]]
+            if not messagebox.askyesno("确认", f"删除标签「{name}」？\n该标签会从所有图书上移除。", parent=win):
+                return
+            if delete_tag(name):
+                messagebox.showinfo("成功", f"标签「{name}」已删除", parent=win)
+                win.destroy()
+                self.show_tag_manager_gui()
+
+        def do_clean():
+            """清理没有任何图书使用的孤儿标签"""
+            orphan = [n for n, c in all_tags if c == 0]
+            if not orphan:
+                messagebox.showinfo("提示", "没有需要清理的标签", parent=win)
+                return
+            if not messagebox.askyesno("确认", f"将清理 {len(orphan)} 个未使用标签：\n"
+                                                f"{'、'.join(orphan[:8])}{'…' if len(orphan) > 8 else ''}",
+                                       parent=win):
+                return
+            for n in orphan:
+                delete_tag(n)
+            messagebox.showinfo("成功", f"已清理 {len(orphan)} 个标签", parent=win)
+            win.destroy()
+            self.show_tag_manager_gui()
+
+        btns = tk.Frame(f, bg=BG)
+        btns.pack(anchor="e")
+        self._btn(btns, "删除选中", do_delete, bg=DANGER, width=10).pack(side="left", padx=5)
+        self._btn(btns, "清理未用", do_clean, width=10).pack(side="left", padx=5)
+        self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=5)
 
     def logout_gui(self):
         if messagebox.askyesno("确认", "确定注销登录？"):
@@ -1236,6 +1384,43 @@ class LibraryApp:
                     f"累计产生罚款：{stats['total_penalty']} 元")
         self.my_stats_label.config(text=text)
 
+    # ========== 借阅周期时间线（Canvas 绘制） ==========
+    def _paint_timeline(self, canvas, record, width=496, height=92):
+        """绘制单次借阅周期时间线：借出 → 应还 → 归还
+        :param record: (borrow_time, return_deadline, return_time)，None 表示无记录
+        """
+        canvas.delete("all")
+        cy = 44
+        if not record or not record[0]:
+            canvas.create_text(width / 2, cy, text="暂无借阅记录", font=(FONT, 9), fill=MUTED)
+            return
+        borrow_t, deadline, return_t = record
+        done = bool(return_t)
+        overdue = False
+        if not done and deadline:
+            try:
+                overdue = datetime.now() > datetime.strptime(deadline, "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                overdue = False
+
+        xs = (66, width / 2, width - 66)
+        canvas.create_line(xs[0], cy, xs[1], cy, fill=LINE, width=2)
+        canvas.create_line(xs[1], cy, xs[2], cy,
+                           fill=DANGER if overdue else (SUCCESS if done else LINE),
+                           width=2, dash=() if (done or overdue) else (4, 3))
+
+        nodes = [
+            ("借出", (borrow_t or "")[:16], ACCENT),
+            ("应还", (deadline or "")[:16], "#e67e22"),
+            ("归还" if done else ("逾期未还" if overdue else "借阅中"),
+             (return_t or "")[:16] if done else ("已超期" if overdue else "进行中"),
+             DANGER if overdue else (SUCCESS if done else MUTED)),
+        ]
+        for x, (label, sub, color) in zip(xs, nodes):
+            canvas.create_oval(x - 9, cy - 9, x + 9, cy + 9, fill=color, outline=PANEL, width=2)
+            canvas.create_text(x, cy - 25, text=label, font=(FONT, 9, "bold"), fill=TEXT)
+            canvas.create_text(x, cy + 21, text=sub, font=(FONT, 8), fill=MUTED)
+
     # ========== 图书详情窗口 ==========
     def show_book_detail(self, book_id):
         """图书详情：封面 + 基本信息 + 我的评分 + 读者评论 + 借阅历史 + 快捷操作"""
@@ -1249,8 +1434,8 @@ class LibraryApp:
         win = tk.Toplevel(self.root)
         win.title(f"图书详情 - 《{title}》")
         win.configure(bg=BG)
-        win.geometry("820x640")
-        win.minsize(760, 580)
+        win.geometry("820x700")
+        win.minsize(760, 620)
         win.transient(self.root)
 
         body = tk.Frame(win, bg=BG, padx=16, pady=14)
@@ -1272,6 +1457,15 @@ class LibraryApp:
         self._label(right, "📘 基本信息", size=12, bold=True, fg=ACCENT).pack(anchor="w")
         info = tk.Frame(right, bg=BG)
         info.pack(anchor="w", pady=4)
+
+        # 标签行（可点击编辑）
+        tag_row = tk.Frame(right, bg=BG)
+        tag_row.pack(anchor="w", pady=(0, 2))
+        self._label(tag_row, "🏷 标签：", size=9, fg=MUTED).pack(side="left")
+        tags = get_book_tags(bid)
+        self._label(tag_row, "、".join(tags) if tags else "（暂无标签）",
+                    size=9, fg=TEXT if tags else MUTED).pack(side="left")
+        self._btn(tag_row, "编辑", lambda: self.edit_tags_gui(bid, win), width=6).pack(side="left", padx=6)
         borrower = get_current_borrower(bid)
         info_rows = [
             ("图书编号", f"#{bid}"),
@@ -1318,16 +1512,28 @@ class LibraryApp:
             self._label(right, "💬 读者评论\n" + cmt, size=9, fg=MUTED,
                         justify="left", wraplength=500).pack(anchor="w", pady=(6, 0))
 
+        # ---- 本次借阅周期时间线 ----
+        hist_records = get_book_borrow_history(bid, 20)
+        if hist_records:
+            self._label(right, "⏱ 本次借阅周期", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
+            timeline = tk.Canvas(right, width=496, height=92, bg=PANEL,
+                                 highlightthickness=1, highlightbackground=LINE)
+            timeline.pack(anchor="w", pady=(0, 4))
+            # 优先展示「尚未归还」的那条记录，其次是最近一次
+            active = next((r for r in hist_records if not r[3]), None)
+            rec = active or hist_records[0]
+            self._paint_timeline(timeline, (rec[1], rec[2], rec[3]))
+
         # ---- 借阅历史 ----
-        self._label(right, "📜 借阅历史", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(10, 2))
+        self._label(right, "📜 借阅历史", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
         hist_cols = ("user", "borrow_time", "deadline", "return_time", "penalty")
-        hist = ttk.Treeview(right, columns=hist_cols, show="headings", height=5)
+        hist = ttk.Treeview(right, columns=hist_cols, show="headings", height=4)
         for col, txt, w, anchor in [("user", "借阅人", 80, None), ("borrow_time", "借阅时间", 125, "center"),
                                     ("deadline", "应还时间", 125, "center"), ("return_time", "归还时间", 125, "center"),
                                     ("penalty", "罚款", 55, "center")]:
             hist.heading(col, text=txt)
             hist.column(col, width=w, anchor=anchor or "w")
-        for h in get_book_borrow_history(bid, 20):
+        for h in hist_records:
             hist.insert("", "end", values=(h[0] or "已注销用户", h[1], h[2],
                                            h[3] if h[3] else "未归还", h[4] or 0))
         if not hist.get_children():
@@ -1392,6 +1598,82 @@ class LibraryApp:
             self._btn(btns, f"取消预约（{pos_txt}）", do_cancel_res).pack(side="left", padx=3)
 
         self._btn(btns, "关闭", win.destroy).pack(side="left", padx=3)
+
+    # ========== 图书标签 ==========
+    def _append_tag_to_entry(self, entry, tag):
+        """往标签输入框里追加一个标签（去重）"""
+        tags = parse_tag_input(entry.get())
+        if tag not in tags:
+            tags.append(tag)
+        entry.delete(0, tk.END)
+        entry.insert(0, "，".join(tags))
+
+    def edit_tags_gui(self, book_id, parent=None):
+        """编辑某本书的标签"""
+        book = get_book_by_id(book_id)
+        if not book:
+            messagebox.showerror("错误", "图书不存在")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title(f"编辑标签 - 《{book[1]}》")
+        win.configure(bg=BG)
+        win.geometry("470x390")
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        f = tk.Frame(win, bg=BG, padx=20, pady=16)
+        f.pack(fill="both", expand=True)
+
+        self._label(f, "🏷 编辑图书标签", size=12, bold=True, fg=ACCENT).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 2))
+        self._label(f, f"《{book[1]}》", size=9, fg=MUTED).grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        self._label(f, "标签（逗号分隔）：").grid(row=2, column=0, sticky="e", pady=6)
+        entry = tk.Entry(f, width=28, font=(FONT, 10), relief="solid", bd=1)
+        entry.insert(0, "，".join(get_book_tags(book_id)))
+        entry.grid(row=2, column=1, pady=6, sticky="w", padx=6)
+
+        # 常用标签快选
+        self._label(f, "常用标签：", size=9, fg=MUTED).grid(row=3, column=0, sticky="ne", pady=6)
+        quick = tk.Frame(f, bg=BG)
+        quick.grid(row=3, column=1, sticky="w", pady=6, padx=6)
+        for t in ("入门", "进阶", "经典", "工具书", "面试必备", "教材", "科普", "小说"):
+            self._btn(quick, t, lambda x=t: self._append_tag_to_entry(entry, x),
+                      width=6).pack(side="left", padx=2, pady=2)
+
+        # 热门标签（按使用数）
+        hot = get_all_tags()[:8]
+        if hot:
+            self._label(f, "热门标签：", size=9, fg=MUTED).grid(row=4, column=0, sticky="ne", pady=6)
+            hot_frame = tk.Frame(f, bg=BG)
+            hot_frame.grid(row=4, column=1, sticky="w", pady=6, padx=6)
+            for name, cnt in hot:
+                self._btn(hot_frame, f"{name}({cnt})",
+                          lambda x=name: self._append_tag_to_entry(entry, x),
+                          width=9).pack(side="left", padx=2, pady=2)
+
+        self._label(f, "多个标签用逗号分隔，单个标签不超过 12 个字",
+                    size=8, fg=MUTED).grid(row=5, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+        def save():
+            ok, tags, msg = set_book_tags(book_id, entry.get())
+            if ok:
+                text = "、".join(tags) if tags else "（已清空全部标签）"
+                messagebox.showinfo("成功", f"标签已保存：{text}", parent=win)
+                win.destroy()
+                if parent is not None and parent.winfo_exists():
+                    parent.destroy()
+                self.show_book_detail(book_id)
+            else:
+                messagebox.showerror("错误", msg, parent=win)
+
+        btns = tk.Frame(f, bg=BG)
+        btns.grid(row=6, column=0, columnspan=2, pady=16)
+        self._btn(btns, "保存标签", save, primary=True, width=10).pack(side="left", padx=5)
+        self._btn(btns, "清空输入", lambda: entry.delete(0, tk.END), width=10).pack(side="left", padx=5)
+        self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=5)
 
     # ========== 高级组合搜索窗口 ==========
     def advanced_search_gui(self):
@@ -1467,12 +1749,74 @@ class LibraryApp:
         self._btn(btns, "重置条件", do_reset, width=10).pack(side="left", padx=6)
         self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=6)
 
+    # ========== 标签筛选窗口 ==========
+    def filter_by_tags_gui(self):
+        """按标签（可多选）筛选图书"""
+        all_tags = get_all_tags()
+        win = tk.Toplevel(self.root)
+        win.title("标签筛选")
+        win.configure(bg=BG)
+        win.geometry("400x470")
+        win.resizable(False, False)
+        win.transient(self.root)
+
+        f = tk.Frame(win, bg=BG, padx=20, pady=16)
+        f.pack(fill="both", expand=True)
+
+        self._label(f, "🏷 按标签筛选图书", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(0, 4))
+        if not all_tags:
+            self._label(f, "还没有任何标签。\n\n可双击图书列表中的任意一本，\n在详情窗口里点「编辑」添加标签。",
+                        size=10, fg=MUTED, justify="left").pack(anchor="w", pady=20)
+            self._btn(f, "关闭", win.destroy, width=10).pack(anchor="e")
+            return
+
+        stat = get_tag_stat()
+        self._label(f, f"共 {stat['total']} 个标签，{stat['tagged_books']} 本图书已打标签"
+                        f"（按住 Ctrl / Shift 可多选）",
+                    size=9, fg=MUTED, justify="left").pack(anchor="w", pady=(0, 8))
+
+        names = [name for name, _cnt in all_tags]
+        listbox = tk.Listbox(f, selectmode="multiple", width=32, height=14,
+                             font=(FONT, 10), relief="solid", bd=1,
+                             activestyle="none")
+        for name, cnt in all_tags:
+            listbox.insert(tk.END, f"{name}    ·  {cnt} 本")
+        listbox.pack(fill="both", expand=True, pady=(0, 8))
+
+        mode = tk.StringVar(value="any")
+        mode_row = tk.Frame(f, bg=BG)
+        mode_row.pack(anchor="w", pady=(0, 10))
+        tk.Radiobutton(mode_row, text="包含任一标签", variable=mode, value="any",
+                       bg=BG, fg=TEXT, activebackground=BG, font=(FONT, 9)).pack(side="left")
+        tk.Radiobutton(mode_row, text="必须包含全部", variable=mode, value="all",
+                       bg=BG, fg=TEXT, activebackground=BG, font=(FONT, 9)).pack(side="left", padx=10)
+
+        def do_filter():
+            sel = [names[i] for i in listbox.curselection()]
+            if not sel:
+                messagebox.showinfo("提示", "请先选择至少一个标签", parent=win)
+                return
+            match_all = mode.get() == "all"
+            books = get_books_by_tags(sel, match_all=match_all)
+            self.fill_book_tree(books)
+            self.page_label.config(
+                text=f"标签筛选（{'全部' if match_all else '任一'}：{'、'.join(sel)}）→ {len(books)} 本")
+            win.destroy()
+
+        btns = tk.Frame(f, bg=BG)
+        btns.pack(anchor="e")
+        self._btn(btns, "开始筛选", do_filter, primary=True, width=10).pack(side="left", padx=5)
+        self._btn(btns, "全选", lambda: listbox.selection_set(0, tk.END), width=8).pack(side="left", padx=5)
+        self._btn(btns, "关闭", win.destroy, width=8).pack(side="left", padx=5)
+
 
 def run():
     init_db()
     init_rating_table()
     init_rules_table()
     init_reservation_table()
+    init_tag_table()
+    init_log_table()
     root = tk.Tk()
     app = LibraryApp(root)
     root.mainloop()

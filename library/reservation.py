@@ -15,6 +15,7 @@ import os
 from datetime import datetime
 
 from rules import check_borrow_permission, get_borrow_summary
+from log import write_log
 
 
 def get_conn():
@@ -101,6 +102,7 @@ def reserve_book(user_id, book_id):
             WHERE book_id = ? AND status = 'waiting'
         ''', (book_id,))
         ahead = cur.fetchone()[0]
+        write_log(user_id, "reserve", f"《{title}》#{book_id}", f"排队第 {ahead} 位")
         return True, f"预约成功！你在《{title}》队列中排第 {ahead} 位"
     except Exception as e:
         print("预约异常：", e)
@@ -132,9 +134,12 @@ def cancel_reservation(user_id, book_id):
         if was_ready:
             cur.execute("SELECT title FROM book WHERE id = ?", (book_id,))
             b = cur.fetchone()
+            btitle = b[0] if b else ""
             _promote_next(cur, book_id)
             conn.commit()
-            return True, f"已取消《{b[0] if b else ''}》的预约，名额已顺延给下一位"
+            write_log(user_id, "cancel_reserve", f"《{btitle}》#{book_id}", "已到书预约被取消，名额顺延")
+            return True, f"已取消《{btitle}》的预约，名额已顺延给下一位"
+        write_log(user_id, "cancel_reserve", f"图书#{book_id}", "取消排队中预约")
         return True, "预约已取消"
     except Exception as e:
         print("取消预约异常：", e)

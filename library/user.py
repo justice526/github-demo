@@ -1,6 +1,8 @@
 import sqlite3
 import os
 
+from log import write_log
+
 def get_conn():
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
     conn = sqlite3.connect(db_path)
@@ -15,7 +17,9 @@ def register_user(username, password, security_q="", security_a=""):
     try:
         cur.execute("INSERT INTO user(username, password, balance, security_q, security_a) VALUES (?, ?, 0, ?, ?)",
                     (username, password, security_q, security_a))
+        new_id = cur.lastrowid
         conn.commit()
+        write_log(new_id, "register", username, "新用户注册")
         return True
     except sqlite3.IntegrityError:
         return False
@@ -29,7 +33,10 @@ def login_user(username, password):
     cur.execute("SELECT id FROM user WHERE username=? AND password=?", (username, password))
     res = cur.fetchone()
     conn.close()
-    return res[0] if res else None
+    if res:
+        write_log(res[0], "login", username, "登录成功")
+        return res[0]
+    return None
 
 def get_balance(user_id):
     """查询用户余额"""
@@ -49,6 +56,7 @@ def recharge_balance(user_id, money):
     cur.execute("UPDATE user SET balance = balance + ? WHERE id=?", (money, user_id))
     conn.commit()
     conn.close()
+    write_log(user_id, "recharge", f"用户#{user_id}", f"充值 {money} 元")
     return True
 
 def modify_password(user_id, old_pwd, new_pwd):
@@ -117,6 +125,7 @@ def pay_fine(user_id, amount):
     cur.execute("UPDATE borrow_record SET penalty=0 WHERE user_id=? AND penalty > 0", (user_id,))
     conn.commit()
     conn.close()
+    write_log(user_id, "pay_fine", f"用户#{user_id}", f"缴纳罚款 {amount} 元")
     return True
 
 if __name__ == "__main__":

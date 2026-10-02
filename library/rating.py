@@ -7,6 +7,8 @@ import sqlite3
 import os
 from datetime import datetime
 
+from log import write_log
+
 
 def get_conn():
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
@@ -58,7 +60,11 @@ def rate_book(user_id, book_id, score, comment=""):
                 comment = excluded.comment,
                 create_time = excluded.create_time
         ''', (user_id, book_id, score, comment or "", now))
+        cur.execute("SELECT title FROM book WHERE id = ?", (book_id,))
+        brow = cur.fetchone()
         conn.commit()
+        write_log(user_id, "rate", f"《{brow[0] if brow else ''}》#{book_id}",
+                  f"{score} 分" + (f"｜{comment}" if comment else ""))
         return True
     except Exception as e:
         print("评分失败：", e)

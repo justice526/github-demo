@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from rules import check_borrow_permission
 from reservation import has_priority_holder, on_book_borrowed, on_book_returned
+from log import write_log
 
 def get_conn():
     db_path = os.path.join(os.path.dirname(__file__), "library.db")
@@ -65,6 +66,7 @@ def borrow_book_ex(user_id, book_id):
 
     # 若自己有该书的预约，标记为已借到
     on_book_borrowed(user_id, book_id)
+    write_log(user_id, "borrow", f"《{title}》#{book_id}", f"应还时间 {deadline_str[:16]}")
     return True, f"借阅成功！《{title}》借期 7 天，请于 {deadline_str[:16]} 前归还"
 
 def return_book(user_id, book_id):
@@ -97,6 +99,10 @@ def return_book(user_id, book_id):
         penalty = round(delta_day * 0.5, 2)
     # 更新图书状态为未借出
     cur.execute("UPDATE book SET is_borrow=0 WHERE id=?", (book_id,))
+    # 顺带取出书名，便于写操作日志
+    cur.execute("SELECT title FROM book WHERE id=?", (book_id,))
+    brow = cur.fetchone()
+    book_title = brow[0] if brow else ""
     # 更新借阅记录：回填归还时间 + 写入计算出来的罚款penalty
     cur.execute('''
         UPDATE borrow_record
@@ -107,6 +113,7 @@ def return_book(user_id, book_id):
     conn.close()
     # 归还后推进预约队列：队首 waiting 自动变为 ready（到书通知）
     on_book_returned(book_id)
+    write_log(user_id, "return", f"《{book_title}》#{book_id}", f"罚款 {penalty} 元")
     return penalty
 
 def get_borrow_record(user_id):
@@ -237,6 +244,9 @@ def renew_book(user_id, book_id, add_days=7):
     # 续借，截止时间 + add_days 天
     new_deadline = deadline + timedelta(days=add_days)
     new_deadline_str = new_deadline.strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute("SELECT title FROM book WHERE id=?", (book_id,))
+    rrow = cur.fetchone()
+    rtitle = rrow[0] if rrow else ""
     cur.execute('''
         UPDATE borrow_record
         SET return_deadline = ?
@@ -244,6 +254,8 @@ def renew_book(user_id, book_id, add_days=7):
     ''', (new_deadline_str, book_id, user_id))
     conn.commit()
     conn.close()
+    write_log(user_id, "renew", f"《{rtitle or ''}》#{book_id}",
+              f"延长 {add_days} 天，新截止 {new_deadline_str[:16]}")
     return new_deadline_str
 
 # ========== 借阅到期提醒 ==========
