@@ -1,4 +1,5 @@
 import tkinter as tk
+import sys
 from datetime import datetime
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from book import *
@@ -11,22 +12,45 @@ from report import build_html, export_html_report
 from tag import *
 from log import get_logs, get_action_stats, clear_logs, action_text, get_log_count
 from db import init_db
+import theme as _theme
+from theme import (LIGHT, DARK, COLOR_OPTIONS,
+                   set_current as set_theme, get_current as get_theme,
+                   is_dark as is_dark_theme, palette as theme_palette,
+                   chart_colors as theme_chart_colors,
+                   load_theme_pref as load_theme_pref,
+                   set_theme_pref as set_theme_pref)
 
-# ===== 浅色主题配色 =====
-BG = "#eef1f6"          # 主背景
-PANEL = "#ffffff"       # 面板/标题栏
-ACCENT = "#3d6cf5"      # 主题蓝
-ACCENT_DK = "#2f56cc"   # 主题蓝（按下）
-TEXT = "#2c3e50"        # 主文字
-MUTED = "#7f8c8d"       # 次要文字
-LINE = "#dfe4ec"        # 分隔线
-DANGER = "#e74c3c"      # 危险红
-SUCCESS = "#27ae60"     # 成功绿
 FONT = "微软雅黑"
 
-# ===== 图表 / 封面配色盘 =====
-CHART_COLORS = ["#3d6cf5", "#16a085", "#e67e22", "#8e44ad", "#e74c3c",
-                "#2980b9", "#27ae60", "#d35400", "#7f8c8d", "#c0392b"]
+
+def _init_palette():
+    """按当前主题填充模块级颜色常量
+
+    这些常量会被 `from gui import *` 之外的本模块代码直接引用，
+    切换主题时由 rebind_globals 重新赋值。
+    """
+    p = theme_palette()
+    globals().update({
+        "BG": p["bg"], "PANEL": p["panel"], "TEXT": p["text"],
+        "MUTED": p["muted"], "LINE": p["line"], "ACCENT": p["accent"],
+        "ACCENT_DK": p["accent_dk"], "DANGER": p["danger"],
+        "SUCCESS": p["success"], "WARN": p["warn"],
+        "BTN_BG": p["btn_bg"], "BTN_HOVER": p["btn_hover"],
+        "ENTRY_BG": p["entry_bg"],
+        "TREE_HEAD": p["tree_head"], "TREE_HEAD_FG": p["tree_head_fg"],
+        "TREE_SEL": p["tree_sel"], "TREE_SEL_FG": p["tree_sel_fg"],
+        "TEXT_BG": p["text_bg"], "TEXT_FG": p["text_fg"],
+        "LIST_SEL": p["list_sel"], "LIST_SEL_FG": p["list_sel_fg"],
+        "COVER_EMPTY_BG": p["cover_empty_bg"],
+        "COVER_EMPTY_FG": p["cover_empty_fg"],
+        "COVER_SHADOW": p["cover_shadow"], "COVER_LINE": p["cover_line"],
+        "COVER_SUB": p["cover_sub"], "COVER_ID": p["cover_id"],
+        "ON_ACCENT": p["cover_on_accent"],
+        "CHART_COLORS": list(theme_chart_colors()),
+    })
+
+
+_init_palette()
 
 
 def _shade(hex_color, factor=0.75):
@@ -48,14 +72,23 @@ class LibraryApp:
         self.root.title("个人图书管理系统")
         self.root.geometry("1100x740")
         self.root.minsize(980, 660)
+        # 恢复上次使用的主题（在建立任何控件之前）
+        try:
+            set_theme(load_theme_pref("light"))
+            _init_palette()
+        except Exception as e:
+            print("加载主题偏好失败，使用浅色主题：", e)
         self.root.configure(bg=BG)
         self.current_user_id = None
         self.page = 1          # 分页浏览状态
+        self._last_book = None
+        self._themed_canvases = []
         self._setup_style()
         self.show_login()
 
     # ================= 通用样式 =================
     def _setup_style(self):
+        """配置 ttk 样式（随主题变化，切换时会重新调用）"""
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -63,33 +96,136 @@ class LibraryApp:
             pass
         style.configure("Treeview", font=(FONT, 10), rowheight=26,
                         background=PANEL, fieldbackground=PANEL, foreground=TEXT)
-        style.configure("Treeview.Heading", font=(FONT, 10, "bold"), background="#e6eaf2")
-        style.map("Treeview", background=[("selected", "#d6e0ff")], foreground=[("selected", TEXT)])
+        style.configure("Treeview.Heading", font=(FONT, 10, "bold"),
+                        background=TREE_HEAD, foreground=TREE_HEAD_FG,
+                        relief="flat")
+        style.map("Treeview",
+                  background=[("selected", TREE_SEL)],
+                  foreground=[("selected", TREE_SEL_FG)])
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", font=(FONT, 10), padding=[16, 8])
-        style.configure("TCombobox", font=(FONT, 9))
+        style.configure("TCombobox", font=(FONT, 9), fieldbackground=ENTRY_BG,
+                        background=PANEL, foreground=TEXT)
+        style.configure("TEntry", fieldbackground=ENTRY_BG, foreground=TEXT)
+        style.configure("Vertical.TScrollbar", background=BG,
+                        troughcolor=PANEL, bordercolor=LINE)
+        style.configure("TLabelframe", background=BG, bordercolor=LINE)
+        style.configure("TLabelframe.Label", background=BG, foreground=TEXT)
+
+    # ================= 主题切换 =================
+    def apply_theme(self, name, persist=True):
+        """切换浅色 / 深色主题
+
+        三步走：
+        1. 重绑本模块的全局颜色常量 —— 之后新建的控件自动用新配色
+        2. 遍历已创建的控件树，把旧色值替换为新色值
+        3. 重绘 Canvas 图元并刷新 ttk 样式
+
+        :param name: "light" 或 "dark"
+        :param persist: 是否记住用户选择（下次启动沿用）
+        """
+        if name not in ("light", "dark"):
+            return
+        old = get_theme()
+        if old == name:
+            return
+
+        # 1) 先切换 theme 模块的当前主题，再重绑本模块的颜色常量。
+        #    顺序很关键：_init_palette() 依赖 theme 的当前色板，
+        #    若在 set_theme 之前调用会用旧色板把常量覆盖回去。
+        set_theme(name)
+        _init_palette()
+        cmap = _theme.rebind_module_globals(sys.modules[__name__], old, name)
+
+        # 2) 重映射已创建的控件
+        try:
+            self.root.configure(bg=BG)
+        except tk.TclError:
+            pass
+        _theme.remap_widget_tree(self.root, cmap)
+
+        # 3) 样式 + Canvas 重绘
+        self._setup_style()
+        self._redraw_themed_canvases()
+
+        if persist:
+            try:
+                set_theme_pref(name)
+            except Exception as e:
+                print("保存主题偏好失败：", e)
+        if hasattr(self, "theme_btn") and self.theme_btn.winfo_exists():
+            self.theme_btn.config(
+                text="☀️ 浅色" if is_dark_theme() else "🌙 深色")
+        if hasattr(self, "cover_info") and self.cover_info.winfo_exists():
+            # 让封面下方文字重新取色
+            try:
+                self.draw_book_cover(getattr(self, "_last_book", None))
+            except Exception:
+                pass
+
+    def toggle_theme(self):
+        """标题栏按钮：浅色 <-> 深色互切"""
+        self.apply_theme("light" if is_dark_theme() else "dark")
+
+    def _redraw_themed_canvases(self):
+        """主题切换后重绘所有 Canvas 内容
+
+        Canvas 图元的颜色是绘制时写死的，不随控件配置变化，
+        因此必须用新色板重新画一遍。
+        """
+        # 主界面：封面卡片 + 两张图表
+        if hasattr(self, "cover_canvas") and self.cover_canvas.winfo_exists():
+            self.draw_book_cover(getattr(self, "_last_book", None))
+        if hasattr(self, "pie_canvas") and self.pie_canvas.winfo_exists():
+            self.draw_category_pie()
+        if hasattr(self, "bar_canvas") and self.bar_canvas.winfo_exists():
+            self.draw_stock_bar()
+        # 弹窗里的封面 / 时间线（登记在 self._themed_canvases）
+        for cvs, painter in list(getattr(self, "_themed_canvases", [])):
+            try:
+                if cvs.winfo_exists():
+                    painter(cvs)
+            except Exception:
+                continue
+
+    def _register_themed_canvas(self, canvas, painter):
+        """登记弹窗内的 Canvas，主题切换时用 painter 重绘
+
+        :param canvas: tk.Canvas 实例
+        :param painter: 无参或接受 canvas 的绘制函数
+        """
+        if not hasattr(self, "_themed_canvases"):
+            self._themed_canvases = []
+        self._themed_canvases.append((canvas, painter))
 
     def _btn(self, parent, text, command, primary=False, width=None, bg=None, fg=None):
         """统一样式的按钮"""
         if primary:
-            b = tk.Button(parent, text=text, command=command, bg=ACCENT, fg="white",
-                          activebackground=ACCENT_DK, activeforeground="white",
+            b = tk.Button(parent, text=text, command=command, bg=ACCENT, fg=ON_ACCENT,
+                          activebackground=ACCENT_DK, activeforeground=ON_ACCENT,
                           relief="flat", cursor="hand2", font=(FONT, 9), padx=12, pady=3)
         elif bg:
-            b = tk.Button(parent, text=text, command=command, bg=bg, fg=fg or "white",
-                          activebackground=bg, activeforeground=fg or "white",
+            b = tk.Button(parent, text=text, command=command, bg=bg, fg=fg or ON_ACCENT,
+                          activebackground=bg, activeforeground=fg or ON_ACCENT,
                           relief="flat", cursor="hand2", font=(FONT, 9), padx=12, pady=3)
         else:
-            b = tk.Button(parent, text=text, command=command, bg="#e8ecf3", fg=TEXT,
-                          activebackground="#d6dde8", relief="flat", cursor="hand2",
+            b = tk.Button(parent, text=text, command=command, bg=BTN_BG, fg=TEXT,
+                          activebackground=BTN_HOVER, relief="flat", cursor="hand2",
                           font=(FONT, 9), padx=12, pady=3)
         if width:
             b.config(width=width)
         return b
 
-    def _label(self, parent, text, size=10, bold=False, fg=TEXT, bg=BG, **kw):
+    def _label(self, parent, text, size=10, bold=False, fg=None, bg=None, **kw):
+        """统一文字标签
+
+        注意：fg/bg 不用模块常量做默认值，否则会在定义时把浅色值
+        固定死，切换主题后新建标签仍是旧配色。
+        """
         f = (FONT, size, "bold") if bold else (FONT, size)
-        return tk.Label(parent, text=text, font=f, fg=fg, bg=bg, **kw)
+        return tk.Label(parent, text=text, font=f,
+                        fg=TEXT if fg is None else fg,
+                        bg=BG if bg is None else bg, **kw)
 
     # ========== 登录窗口 ==========
     def show_login(self):
@@ -110,10 +246,10 @@ class LibraryApp:
         frame = tk.Frame(self.login_win, bg=PANEL)
         frame.pack(pady=18)
         self._label(frame, "用户名：", bg=PANEL).grid(row=0, column=0, pady=6, sticky="e")
-        self.entry_user = tk.Entry(frame, width=20, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_user = tk.Entry(frame, width=20, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_user.grid(row=0, column=1, pady=6)
         self._label(frame, "密  码：", bg=PANEL).grid(row=1, column=0, pady=6, sticky="e")
-        self.entry_pwd = tk.Entry(frame, width=20, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_pwd = tk.Entry(frame, width=20, font=(FONT, 10), show="*", relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_pwd.grid(row=1, column=1, pady=6)
         self.login_win.bind("<Return>", lambda e: self.do_login())
 
@@ -182,6 +318,11 @@ class LibraryApp:
         header = tk.Frame(self.root, bg=PANEL)
         header.pack(fill="x", side="top")
         self._label(header, "📚 个人图书管理系统", size=15, bold=True, fg=ACCENT, bg=PANEL).pack(side="left", padx=18, pady=12)
+        # 主题切换按钮
+        self.theme_btn = self._btn(
+            header, "🌙 深色" if is_dark_theme() else "☀️ 浅色",
+            self.toggle_theme, bg=BTN_BG, fg=TEXT)
+        self.theme_btn.pack(side="right", padx=(0, 12))
         self.user_label = self._label(header, "", bg=PANEL)
         self.user_label.pack(side="right", padx=18)
         tk.Frame(self.root, bg=ACCENT, height=2).pack(fill="x")
@@ -223,7 +364,7 @@ class LibraryApp:
                   ("搜索关键词：", "entry_search"), ("分类筛选：", "entry_cat_filter")]
         for i, (text, attr) in enumerate(fields):
             self._label(left, text).grid(row=i, column=0, sticky="e", pady=4)
-            e = tk.Entry(left, width=18, font=(FONT, 10), relief="solid", bd=1)
+            e = tk.Entry(left, width=18, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
             e.grid(row=i, column=1, pady=4)
             setattr(self, attr, e)
 
@@ -292,7 +433,7 @@ class LibraryApp:
         page_bar = tk.Frame(list_frame, bg=BG)
         page_bar.pack(side="bottom", fill="x", pady=6)
         self._label(page_bar, "每页").pack(side="left")
-        self.entry_page_size = tk.Entry(page_bar, width=4, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_page_size = tk.Entry(page_bar, width=4, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_page_size.insert(0, "5")
         self.entry_page_size.pack(side="left", padx=3)
         self._label(page_bar, "本").pack(side="left")
@@ -514,9 +655,12 @@ class LibraryApp:
         """
         c.delete("all")
         if not book:
-            c.create_rectangle(2, 2, width - 10, height - 10, fill="#f4f6fa", outline=LINE, dash=(4, 3))
-            c.create_text(width / 2 - 2, height / 2 - 20, text="📖", font=(FONT, 26), fill="#c8d0dc")
-            c.create_text(width / 2 - 2, height / 2 + 20, text="未选择图书", font=(FONT, 9), fill=MUTED)
+            c.create_rectangle(2, 2, width - 10, height - 10, fill=COVER_EMPTY_BG,
+                               outline=LINE, dash=(4, 3))
+            c.create_text(width / 2 - 2, height / 2 - 20, text="📖",
+                          font=(FONT, 26), fill=COVER_EMPTY_FG)
+            c.create_text(width / 2 - 2, height / 2 + 20, text="未选择图书",
+                          font=(FONT, 9), fill=MUTED)
             return
 
         bid, title, author, category, status = book
@@ -529,30 +673,33 @@ class LibraryApp:
         cx = (2 + right) / 2 + 8
 
         # 阴影 + 封面主体 + 书脊
-        c.create_rectangle(6, 6, right + 4, bottom + 4, fill="#d9dee7", outline="")
+        c.create_rectangle(6, 6, right + 4, bottom + 4, fill=COVER_SHADOW, outline="")
         c.create_rectangle(2, 2, right, bottom, fill=base, outline="")
         c.create_rectangle(2, 2, 17, bottom, fill=dark, outline="")
         c.create_line(20, 2, 20, bottom, fill=dark, width=1)
-        c.create_line(34, 42, right - 16, 42, fill="#ffffff", width=1)
+        c.create_line(34, 42, right - 16, 42, fill=COVER_LINE, width=1)
 
         # 书名（最多 3 行自动换行）+ 作者
         lines = self._wrap_text(title, 9)[:3]
         y = 78 if len(lines) < 3 else 64
         for line in lines:
-            c.create_text(cx, y, text=line, fill="#ffffff", font=(FONT, 13, "bold"))
+            c.create_text(cx, y, text=line, fill=COVER_LINE, font=(FONT, 13, "bold"))
             y += 26
-        c.create_text(cx, y + 14, text=str(author or "佚名"), fill="#f2f5ff", font=(FONT, 9))
+        c.create_text(cx, y + 14, text=str(author or "佚名"),
+                      fill=COVER_SUB, font=(FONT, 9))
 
         # 底部信息区
-        c.create_line(34, bottom - 46, right - 16, bottom - 46, fill="#ffffff", width=1)
-        c.create_text(cx, bottom - 30, text=str(category or "未分类"), fill="#ffffff", font=(FONT, 9))
-        c.create_text(cx, bottom - 12, text=f"编号 #{bid}", fill="#e6ecff", font=(FONT, 8))
+        c.create_line(34, bottom - 46, right - 16, bottom - 46, fill=COVER_LINE, width=1)
+        c.create_text(cx, bottom - 30, text=str(category or "未分类"),
+                      fill=COVER_LINE, font=(FONT, 9))
+        c.create_text(cx, bottom - 12, text=f"编号 #{bid}",
+                      fill=COVER_ID, font=(FONT, 8))
 
         # 右上角状态角标
         tag_color = DANGER if borrowed else SUCCESS
         tag_text = "已借出" if borrowed else "在架可借"
         c.create_rectangle(right - 72, 12, right - 8, 30, fill=tag_color, outline="")
-        c.create_text(right - 40, 21, text=tag_text, fill="#ffffff", font=(FONT, 8))
+        c.create_text(right - 40, 21, text=tag_text, fill=ON_ACCENT, font=(FONT, 8))
 
     def _rating_line(self, book_id):
         """生成评分文本行，例如「评分：★★★★☆ 4.5（3人）」"""
@@ -565,6 +712,7 @@ class LibraryApp:
         """绘制主界面右侧封面卡片，并刷新下方文字信息
         :param book: (id, title, author, category, status) 或 None
         """
+        self._last_book = book
         self._paint_cover(self.cover_canvas, book)
         if not book:
             self.cover_info.config(text="← 在左侧列表中\n   选择一本图书", fg=MUTED)
@@ -583,19 +731,19 @@ class LibraryApp:
         top.pack(fill="x")
 
         self._label(top, "图书ID：").grid(row=0, column=0, padx=5)
-        self.entry_br_bid = tk.Entry(top, width=12, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_br_bid = tk.Entry(top, width=12, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_br_bid.grid(row=0, column=1, padx=5)
         self._btn(top, "借阅图书", self.borrow_book_gui, primary=True).grid(row=0, column=2, padx=8)
         self._btn(top, "归还图书", self.return_book_gui).grid(row=0, column=3, padx=8)
 
         self._label(top, "续借天数：").grid(row=0, column=4, padx=5)
-        self.entry_renew_days = tk.Entry(top, width=8, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_renew_days = tk.Entry(top, width=8, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_renew_days.insert(0, "7")
         self.entry_renew_days.grid(row=0, column=5, padx=5)
         self._btn(top, "续借", self.renew_book_gui).grid(row=0, column=6, padx=8)
         self._btn(top, "查看逾期图书", self.show_overdue_gui).grid(row=0, column=7, padx=8)
         self._btn(top, "刷新我的借阅", self.refresh_my_borrow).grid(row=0, column=8, padx=8)
-        self._btn(top, "🔔 到期提醒", self.show_due_reminder_gui, bg="#e67e22").grid(row=0, column=9, padx=8)
+        self._btn(top, "🔔 到期提醒", self.show_due_reminder_gui, bg=WARN).grid(row=0, column=9, padx=8)
 
         # 第二行：预约相关操作 + 借阅额度状态
         row2 = tk.Frame(self.tab_borrow, bg=BG, padx=10)
@@ -818,17 +966,17 @@ class LibraryApp:
         # 余额充值
         section(0, "💰 余额充值")
         self._label(frame, "充值金额：").grid(row=1, column=0, pady=5, sticky="e")
-        self.entry_recharge = tk.Entry(frame, width=18, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_recharge = tk.Entry(frame, width=18, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_recharge.grid(row=1, column=1, pady=5, sticky="w")
         self._btn(frame, "确认充值", self.recharge_gui, primary=True).grid(row=1, column=2, padx=10, sticky="w")
 
         # 修改密码
         section(2, "🔑 修改密码")
         self._label(frame, "旧密码：").grid(row=3, column=0, pady=5, sticky="e")
-        self.entry_old_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_old_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_old_pwd.grid(row=3, column=1, pady=5, sticky="w")
         self._label(frame, "新密码：").grid(row=4, column=0, pady=5, sticky="e")
-        self.entry_new_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1)
+        self.entry_new_pwd = tk.Entry(frame, width=18, font=(FONT, 10), show="*", relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_new_pwd.grid(row=4, column=1, pady=5, sticky="w")
         self._btn(frame, "确认修改", self.modify_pwd_gui).grid(row=4, column=2, padx=10, sticky="w")
 
@@ -1001,13 +1149,13 @@ class LibraryApp:
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
 
         self._label(f, "每人最多借阅：").grid(row=1, column=0, sticky="e", pady=6)
-        e_limit = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1)
+        e_limit = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         e_limit.insert(0, str(get_borrow_limit()))
         e_limit.grid(row=1, column=1, sticky="w", pady=6, padx=6)
         self._label(f, "本", size=9, fg=MUTED).grid(row=1, column=2, sticky="w")
 
         self._label(f, "欠费暂停阈值：").grid(row=2, column=0, sticky="e", pady=6)
-        e_thr = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1)
+        e_thr = tk.Entry(f, width=12, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         e_thr.insert(0, str(get_fine_threshold()))
         e_thr.grid(row=2, column=1, sticky="w", pady=6, padx=6)
         self._label(f, "元", size=9, fg=MUTED).grid(row=2, column=2, sticky="w")
@@ -1145,7 +1293,7 @@ class LibraryApp:
             return
 
         names = [n for n, _c in all_tags]
-        listbox = tk.Listbox(f, width=34, height=16, font=(FONT, 10), relief="solid", bd=1)
+        listbox = tk.Listbox(f, width=34, height=16, font=(FONT, 10), relief="solid", bd=1, bg=PANEL, fg=TEXT, selectbackground=LIST_SEL, selectforeground=LIST_SEL_FG, highlightbackground=LINE)
         for name, cnt in all_tags:
             listbox.insert(tk.END, f"{name}    ·  {cnt} 本")
         listbox.pack(fill="both", expand=True, pady=(0, 10))
@@ -1224,15 +1372,15 @@ class LibraryApp:
         self.rank_type.set("借阅次数")
         self.rank_type.grid(row=0, column=1, padx=4)
         self._label(rank_frame, "Top").grid(row=0, column=2, padx=(8, 0))
-        self.entry_rank_num = tk.Entry(rank_frame, width=5, font=(FONT, 10), relief="solid", bd=1)
+        self.entry_rank_num = tk.Entry(rank_frame, width=5, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         self.entry_rank_num.insert(0, "5")
         self.entry_rank_num.grid(row=0, column=3, padx=5)
         self._btn(rank_frame, "查询", self.show_rank).grid(row=0, column=4, padx=5)
-        self.rank_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.rank_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1, bg=TEXT_BG, fg=TEXT_FG, insertbackground=TEXT, highlightbackground=LINE, selectbackground=TREE_SEL, selectforeground=TREE_SEL_FG)
         self.rank_text.pack(anchor="w", pady=3)
 
         self._label(frame, "📚 图书分类统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
-        self.cat_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1)
+        self.cat_text = tk.Text(frame, height=3, width=64, font=(FONT, 9), relief="solid", bd=1, bg=TEXT_BG, fg=TEXT_FG, insertbackground=TEXT, highlightbackground=LINE, selectbackground=TREE_SEL, selectforeground=TREE_SEL_FG)
         self.cat_text.pack(anchor="w", pady=3)
 
         self._label(frame, "👤 我的借阅统计", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
@@ -1294,7 +1442,7 @@ class LibraryApp:
         # 网格线与纵轴刻度
         for k in range(1, 5):
             y = bottom - (bottom - top) * k / 4
-            c.create_line(left, y, right, y, fill="#eef1f6")
+            c.create_line(left, y, right, y, fill=BG)
             c.create_text(left - 5, y, text=str(round(max_v * k / 4)), anchor="e",
                           font=(FONT, 7), fill=MUTED)
         c.create_line(left, top - 8, left, bottom, fill=LINE)
@@ -1314,7 +1462,7 @@ class LibraryApp:
             # 借出（橙，堆叠在上）
             if h_borrow > 0:
                 c.create_rectangle(cx - bar_w / 2, bottom - h_stock - h_borrow,
-                                   cx + bar_w / 2, bottom - h_stock, fill="#e67e22", outline="")
+                                   cx + bar_w / 2, bottom - h_stock, fill=WARN, outline="")
             c.create_text(cx, bottom + 12, text=(s["category"] or "未分类")[:4],
                           font=(FONT, 7), fill=MUTED)
             if s["total"] > 0:
@@ -1324,7 +1472,7 @@ class LibraryApp:
         # 图例
         c.create_rectangle(right - 118, 10, right - 108, 20, fill=ACCENT, outline="")
         c.create_text(right - 102, 15, text="在架", anchor="w", font=(FONT, 8), fill=TEXT)
-        c.create_rectangle(right - 62, 10, right - 52, 20, fill="#e67e22", outline="")
+        c.create_rectangle(right - 62, 10, right - 52, 20, fill=WARN, outline="")
         c.create_text(right - 46, 15, text="借出", anchor="w", font=(FONT, 8), fill=TEXT)
 
     def refresh_all_stats(self):
@@ -1411,7 +1559,7 @@ class LibraryApp:
 
         nodes = [
             ("借出", (borrow_t or "")[:16], ACCENT),
-            ("应还", (deadline or "")[:16], "#e67e22"),
+            ("应还", (deadline or "")[:16], WARN),
             ("归还" if done else ("逾期未还" if overdue else "借阅中"),
              (return_t or "")[:16] if done else ("已超期" if overdue else "进行中"),
              DANGER if overdue else (SUCCESS if done else MUTED)),
@@ -1448,6 +1596,9 @@ class LibraryApp:
         cv = tk.Canvas(left, width=200, height=272, bg=PANEL, highlightthickness=0)
         cv.pack()
         self._paint_cover(cv, (bid, title, author, category, status))
+        # 登记重绘：切换主题时用新色板重画封面
+        self._register_themed_canvas(
+            cv, lambda c: self._paint_cover(c, (bid, title, author, category, status)))
         self._label(left, self._rating_line(bid), size=9, fg=MUTED, bg=PANEL).pack(anchor="w", pady=(8, 0))
 
         # ---- 右侧：信息 / 评分 / 评论 / 历史 ----
@@ -1490,7 +1641,7 @@ class LibraryApp:
         ttk.Combobox(rate_row, textvariable=score_var, width=3, state="readonly",
                      values=["1", "2", "3", "4", "5"]).pack(side="left", padx=4)
         self._label(rate_row, " 评论：").pack(side="left")
-        comment_entry = tk.Entry(rate_row, width=26, font=(FONT, 9), relief="solid", bd=1)
+        comment_entry = tk.Entry(rate_row, width=26, font=(FONT, 9), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         comment_entry.insert(0, my["my_comment"])
         comment_entry.pack(side="left", padx=4)
 
@@ -1523,6 +1674,9 @@ class LibraryApp:
             active = next((r for r in hist_records if not r[3]), None)
             rec = active or hist_records[0]
             self._paint_timeline(timeline, (rec[1], rec[2], rec[3]))
+            # 登记重绘：切换主题时用新色板重画时间线
+            self._register_themed_canvas(
+                timeline, lambda c: self._paint_timeline(c, (rec[1], rec[2], rec[3])))
 
         # ---- 借阅历史 ----
         self._label(right, "📜 借阅历史", size=12, bold=True, fg=ACCENT).pack(anchor="w", pady=(8, 2))
@@ -1592,7 +1746,7 @@ class LibraryApp:
         # 预约按钮：已借出且我未预约 → 可预约；我已预约 → 可取消
         my_pos = get_my_queue_position(self.current_user_id, bid)
         if my_pos is None and is_borrow == 1:
-            self._btn(btns, "📌 预约本书", do_reserve, bg="#e67e22").pack(side="left", padx=3)
+            self._btn(btns, "📌 预约本书", do_reserve, bg=WARN).pack(side="left", padx=3)
         elif my_pos is not None:
             pos_txt = "已到书可借" if my_pos == 0 else f"排第 {my_pos} 位"
             self._btn(btns, f"取消预约（{pos_txt}）", do_cancel_res).pack(side="left", padx=3)
@@ -1631,7 +1785,7 @@ class LibraryApp:
             row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
         self._label(f, "标签（逗号分隔）：").grid(row=2, column=0, sticky="e", pady=6)
-        entry = tk.Entry(f, width=28, font=(FONT, 10), relief="solid", bd=1)
+        entry = tk.Entry(f, width=28, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         entry.insert(0, "，".join(get_book_tags(book_id)))
         entry.grid(row=2, column=1, pady=6, sticky="w", padx=6)
 
@@ -1692,11 +1846,11 @@ class LibraryApp:
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
         self._label(f, "书名包含：").grid(row=1, column=0, sticky="e", pady=5)
-        e_title = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1)
+        e_title = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         e_title.grid(row=1, column=1, pady=5, sticky="w")
 
         self._label(f, "作者包含：").grid(row=2, column=0, sticky="e", pady=5)
-        e_author = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1)
+        e_author = tk.Entry(f, width=22, font=(FONT, 10), relief="solid", bd=1, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT, highlightbackground=LINE)
         e_author.grid(row=2, column=1, pady=5, sticky="w")
 
         self._label(f, "分类：").grid(row=3, column=0, sticky="e", pady=5)
@@ -1778,7 +1932,7 @@ class LibraryApp:
         names = [name for name, _cnt in all_tags]
         listbox = tk.Listbox(f, selectmode="multiple", width=32, height=14,
                              font=(FONT, 10), relief="solid", bd=1,
-                             activestyle="none")
+                             activestyle="none", bg=PANEL, fg=TEXT, selectbackground=LIST_SEL, selectforeground=LIST_SEL_FG, highlightbackground=LINE)
         for name, cnt in all_tags:
             listbox.insert(tk.END, f"{name}    ·  {cnt} 本")
         listbox.pack(fill="both", expand=True, pady=(0, 8))
@@ -1787,9 +1941,11 @@ class LibraryApp:
         mode_row = tk.Frame(f, bg=BG)
         mode_row.pack(anchor="w", pady=(0, 10))
         tk.Radiobutton(mode_row, text="包含任一标签", variable=mode, value="any",
-                       bg=BG, fg=TEXT, activebackground=BG, font=(FONT, 9)).pack(side="left")
+                       bg=BG, fg=TEXT, activebackground=BG, selectcolor=PANEL,
+                       activeforeground=TEXT, font=(FONT, 9)).pack(side="left")
         tk.Radiobutton(mode_row, text="必须包含全部", variable=mode, value="all",
-                       bg=BG, fg=TEXT, activebackground=BG, font=(FONT, 9)).pack(side="left", padx=10)
+                       bg=BG, fg=TEXT, activebackground=BG, selectcolor=PANEL,
+                       activeforeground=TEXT, font=(FONT, 9)).pack(side="left", padx=10)
 
         def do_filter():
             sel = [names[i] for i in listbox.curselection()]
