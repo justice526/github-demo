@@ -84,20 +84,52 @@
 - 选择结果自动记住，下次启动沿用上次主题
 - 实现方式：语义色板 + 控件树运行时重映射，不改动任何业务调用点
 
+## 架构分层
+
+代码按四层组织，依赖方向严格单向向下（上层可依赖下层，反之禁止）：
+
+```
+gui.py / app.py        界面层：Tkinter 界面与命令行菜单
+      ↓ 只调适配层
+book.py ~ log.py       适配层：保持旧签名不变，内部转发（向后兼容）
+      ↓
+service/               服务层：业务规则、校验、流程编排（无 SQL）
+      ↓
+repository/            仓储层：纯数据访问（只有 SQL，无业务规则）
+      ↓
+core/                  底座：连接管理、事务、类型化异常、统一返回类型
+```
+
+| 层 | 目录 | 职责 | 禁止 |
+| --- | --- | --- | --- |
+| 底座 | `core/` | 连接池、事务边界、类型化异常、`Result` | 不得引用上层任何模块 |
+| 仓储 | `repository/` | 只写 SQL，只关心数据存取 | 不得含业务规则 |
+| 服务 | `service/` | 业务规则与编排 | **不得出现 SQL** |
+| 适配 | `*.py`（根目录） | 旧签名转发 + 异常翻译 | 不得直接写 SQL |
+| 界面 | `gui.py` / `app.py` | 展示与交互 | 不直接访问 repository |
+
+**事务边界**：多步写入一律用 `core.db.transaction()`，异常自动回滚。
+借阅（改 book 状态 + 插 borrow_record）、归还、缴罚款（扣余额 + 销罚款）
+都跨表，都在同一事务内完成，不会出现中间态。
+
 ## 项目结构
 
-| 文件 | 说明 |
+| 文件 / 目录 | 说明 |
 | --- | --- |
 | `main.py` | 统一启动入口，选择命令行或图形界面模式 |
-| `app.py` | 命令行版主程序（菜单交互） |
-| `gui.py` | 图形界面版主程序（Tkinter） |
-| `book.py` | 图书增删改查、搜索、统计、备份恢复 |
-| `user.py` | 用户、余额、密码、密保相关操作 |
-| `borrow.py` | 借阅、归还、续借、罚款、借阅历史与 CSV 导出 |
-| `rating.py` | 图书评分与评论（独立维护 rating 表） |
-| `rules.py` | 借阅规则引擎与参数配置（独立维护 config 表） |
-| `reservation.py` | 图书预约排队与到书通知（独立维护 reservation 表） |
-| `tag.py` | 图书标签体系（独立维护 tag / book_tag 表） |
+| `app.py` | 命令行版主程序（41 项菜单） |
+| `gui.py` | 图形界面版主程序（Tkinter，4 个标签页） |
+| `core/` | **底座**：`db.py` 连接与事务、`errors.py` 类型化异常、`result.py` 统一返回 |
+| `repository/` | **仓储层**：9 个 `*_repo.py`，每张表由对应模块独占 |
+| `service/` | **服务层**：8 个 `*_service.py`，承载全部业务规则 |
+| `book.py` | 图书业务（适配层，转发 `book_service`） |
+| `user.py` | 用户与认证（适配层，转发 `user_service`） |
+| `borrow.py` | 借阅业务（适配层，转发 `borrow_service`） |
+| `rating.py` | 评分与评论（适配层，转发 `rating_service`） |
+| `rules.py` | 借阅规则（适配层，转发 `rules_service`） |
+| `reservation.py` | 预约排队（适配层，转发 `reservation_service`） |
+| `tag.py` | 标签体系（适配层，转发 `tag_service`） |
+| `log.py` | 操作日志（适配层，转发 `log_service`） |
 | `log.py` | 操作日志审计（独立维护 operation_log 表） |
 | `theme.py` | 界面主题（浅色 / 深色语义色板与控件树重映射） |
 | `report.py` | HTML 统计报告生成 |

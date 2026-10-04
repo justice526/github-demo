@@ -1,132 +1,116 @@
-import sqlite3
-import os
+"""用户模块（向后兼容适配层）
 
-from log import write_log
+真正的业务逻辑在 `service/user_service.py`。
+本文件保持原有函数签名与返回约定，异常在此翻译回旧行为。
 
-def get_conn():
-    db_path = os.path.join(os.path.dirname(__file__), "library.db")
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+适配要点：
+- `login_user` 失败返回 None（旧实现如此，不是 False）
+- `get_balance` 保留 round(x, 2) 舍入
+- 重复注册 / 密码错误等一律返回 False，异常不外泄
+"""
 
-# ========= 用户相关 =========
+from core.errors import AppError
+from core.db import get_conn          # 兼容旧的 from user import get_conn
+from service import user_service
+from service import log_service
+
+
+# ==================== 注册 / 登录 ====================
+
 def register_user(username, password, security_q="", security_a=""):
-    """注册用户，用户名唯一；成功返回True，重复返回False"""
-    conn = get_conn()
-    cur = conn.cursor()
+    """注册用户，用户名唯一；成功 True，重复或非法返回 False"""
     try:
-        cur.execute("INSERT INTO user(username, password, balance, security_q, security_a) VALUES (?, ?, 0, ?, ?)",
-                    (username, password, security_q, security_a))
-        new_id = cur.lastrowid
-        conn.commit()
-        write_log(new_id, "register", username, "新用户注册")
+        uid = user_service.register(username, password, security_q, security_a)
+        # 用新用户 id 记日志，与旧实现一致（日志要能追溯到人）
+        log_service.write(uid, "register", str(username), "新用户注册")
         return True
-    except sqlite3.IntegrityError:
+    except AppError:
         return False
-    finally:
-        conn.close()
+    except Exception:
+        return False
+
 
 def login_user(username, password):
-    """登录，成功返回user_id，失败返回None"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM user WHERE username=? AND password=?", (username, password))
-    res = cur.fetchone()
-    conn.close()
-    if res:
-        write_log(res[0], "login", username, "登录成功")
-        return res[0]
-    return None
+    """登录，成功返回 user_id，失败返回 None"""
+    try:
+        uid = user_service.login(username, password)
+        log_service.write(uid, "login", str(username), "登录成功")
+        return uid
+    except AppError:
+        return None
+    except Exception:
+        return None
+
+
+# ==================== 余额 ====================
 
 def get_balance(user_id):
-    """查询用户余额"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT balance FROM user WHERE id=?", (user_id,))
-    res = cur.fetchone()
-    conn.close()
-    return round(res[0], 2) if res else 0.0
+    """查询用户余额（保留两位小数）"""
+    return round(user_service.get_balance(user_id), 2)
+
 
 def recharge_balance(user_id, money):
-    """余额充值，money>0才生效"""
-    if money <= 0:
+    """充值，money > 0 才生效"""
+    try:
+        user_service.recharge(user_id, money)
+        log_service.write(user_id, "recharge", f"用户#{user_id}", f"充值 {money} 元")
+        return True
+    except AppError:
         return False
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("UPDATE user SET balance = balance + ? WHERE id=?", (money, user_id))
-    conn.commit()
-    conn.close()
-    write_log(user_id, "recharge", f"用户#{user_id}", f"充值 {money} 元")
-    return True
+    except Exception:
+        return False
+
+
+def pay_fine(user_id, amount):
+    """缴纳罚款：扣余额并结清该用户所有未缴罚款"""
+    try:
+        user_service.pay_fine(user_id, amount)
+        log_service.write(user_id, "pay_fine", f"用户#{user_id}", f"缴纳罚款 {amount} 元")
+        return True
+    except AppError:
+        return False
+    except Exception:
+        return False
+
+
+# ==================== 密码 ====================
 
 def modify_password(user_id, old_pwd, new_pwd):
     """修改登录密码"""
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM user WHERE id=? AND password=?", (user_id, old_pwd))
-    if not cur.fetchone():
-        conn.close()
+    try:
+        user_service.modify_password(user_id, old_pwd, new_pwd)
+        return True
+    except AppError:
         return False
-    cur.execute("UPDATE user SET password=? WHERE id=?", (new_pwd, user_id))
-    conn.commit()
-    conn.close()
-    return True
+    except Exception:
+        return False
 
-# ===== 忘记密码：获取密保问题 =====
+
 def get_security_question(username):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT security_q FROM user WHERE username=?", (username,))
-    res = cur.fetchone()
-    conn.close()
-    return res[0] if res else None
+    """取密保问题"""
+    return user_service.get_security_question(username)
 
-# ===== 忘记密码：验证密保答案，重置密码 =====
+
 def reset_password_by_qa(username, security_ans, new_pwd):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM user WHERE username=? AND security_a=?", (username, security_ans))
-    if not cur.fetchone():
-        conn.close()
+    """通过密保问题与答案重置密码"""
+    try:
+        user_service.reset_password_by_qa(username, security_ans, new_pwd)
+        return True
+    except AppError:
         return False
-    cur.execute("UPDATE user SET password=? WHERE username=?", (new_pwd, username))
-    conn.commit()
-    conn.close()
-    return True
+    except Exception:
+        return False
 
-# ===== 管理员：判断当前用户是否为管理员 =====
+
 def is_admin(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT is_admin FROM user WHERE id=?", (user_id,))
-    res = cur.fetchone()
-    conn.close()
-    return bool(res and res[0] == 1)
+    """是否管理员"""
+    return user_service.is_admin(user_id)
 
-# ===== 管理员：查询全部用户 =====
+
 def get_all_users():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, username, balance, is_admin FROM user")
-    data = cur.fetchall()
-    conn.close()
-    return data
+    """全部用户（不含密码）"""
+    return user_service.list_users()
 
-# ===== 罚款相关 =====
-def pay_fine(user_id, amount):
-    """缴纳罚款：余额扣钱，并结清该用户所有未缴罚款"""
-    conn = get_conn()
-    cur = conn.cursor()
-    if get_balance(user_id) < amount:
-        conn.close()
-        return False
-    cur.execute("UPDATE user SET balance = balance - ? WHERE id=?", (amount, user_id))
-    # 结清该用户所有未缴罚款（penalty > 0 的记录）
-    cur.execute("UPDATE borrow_record SET penalty=0 WHERE user_id=? AND penalty > 0", (user_id,))
-    conn.commit()
-    conn.close()
-    write_log(user_id, "pay_fine", f"用户#{user_id}", f"缴纳罚款 {amount} 元")
-    return True
 
 if __name__ == "__main__":
-    print("user模块加载完成")
+    print("user 模块为兼容适配层，业务逻辑见 service/user_service.py")
