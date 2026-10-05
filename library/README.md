@@ -107,6 +107,7 @@ core/                  底座：连接管理、事务、类型化异常、统一
 | 服务 | `service/` | 业务规则与编排 | **不得出现 SQL** |
 | 适配 | `*.py`（根目录） | 旧签名转发 + 异常翻译 | 不得直接写 SQL |
 | 界面 | `gui.py` / `app.py` | 展示与交互 | 不直接访问 repository |
+| Web | `web.py` | REST API（复用 service 层） | 不写业务逻辑 |
 
 **事务边界**：多步写入一律用 `core.db.transaction()`，异常自动回滚。
 借阅（改 book 状态 + 插 borrow_record）、归还、缴罚款（扣余额 + 销罚款）
@@ -130,6 +131,7 @@ core/                  底座：连接管理、事务、类型化异常、统一
 | `reservation.py` | 预约排队（适配层，转发 `reservation_service`） |
 | `tag.py` | 标签体系（适配层，转发 `tag_service`） |
 | `log.py` | 操作日志（适配层，转发 `log_service`） |
+| `web.py` | **REST API**（纯标准库 http.server，复用 service 层，见下） |
 | `log.py` | 操作日志审计（独立维护 operation_log 表） |
 | `theme.py` | 界面主题（浅色 / 深色语义色板与控件树重映射） |
 | `report.py` | HTML 统计报告生成 |
@@ -222,3 +224,37 @@ python db.py
 - 输入健壮性：命令行对所有数字输入做了校验，非法输入不会导致程序崩溃。
 - 界面与图表全部使用 Python 标准库（`tkinter.Canvas`）绘制，不依赖任何第三方库。
 - `rating` / `config` / `reservation` / `tag` / `book_tag` / `operation_log` 六张表由各自模块独立幂等创建，无需手动建表。
+
+## Web API
+
+无需任何第三方依赖，用标准库 `http.server` 实现的 REST 接口，
+直接复用 service 层（控制器不写业务逻辑）。
+
+```bash
+python web.py          # 默认 127.0.0.1:8000
+python web.py 9000     # 指定端口
+```
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/health` | 健康检查 |
+| POST | `/api/login` | 登录，返回 token |
+| POST | `/api/register` | 注册 |
+| GET | `/api/books` | 图书列表（`?q=关键词&category=分类&page=&size=`） |
+| GET | `/api/books/<id>` | 图书详情（含评分与标签） |
+| POST / PUT / DELETE | `/api/books[/<id>]` | 增改删（管理员，需 token） |
+| POST | `/api/borrow` | 借阅 `{book_id}` |
+| POST | `/api/return` | 归还 `{book_id}` |
+| POST | `/api/renew` | 续借 `{book_id, days}` |
+| GET | `/api/my/records` | 我的借阅记录 |
+| GET | `/api/my/summary` | 我的借阅摘要 |
+| GET | `/api/books/<id>/rating` + POST | 查看 / 提交评分 |
+| GET | `/api/stats/dashboard` | 统计仪表盘 |
+| GET | `/api/books/rank` | 借阅排行 |
+
+**错误码**：类型化异常精确映射 HTTP 状态码
+（400 校验 / 401 未登录 / 403 无权限 / 404 不存在 / 422 业务规则 / 500 服务器错误），
+响应统一为 `{ok, code, message}`，绝不向客户端泄露堆栈。
+
+> 认证为单机演示用的内存 token；生产环境应换 JWT 短时效访问令牌 +
+> 服务端刷新令牌，token 不要存 localStorage，也不要放 URL 查询参数。
