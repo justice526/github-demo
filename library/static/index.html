@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图书管理系统</title>
+<style>
+  :root {
+    --bg: #eef1f6;
+    --panel: #ffffff;
+    --text: #2c3e50;
+    --muted: #7f8c8d;
+    --line: #dfe4ec;
+    --accent: #3d6cf5;
+    --accent-dk: #2f56cc;
+    --danger: #e74c3c;
+    --success: #27ae60;
+    --warn: #e67e22;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "微软雅黑", sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; line-height: 1.6;
+  }
+  .topbar {
+    background: var(--panel); padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 2px solid var(--accent);
+  }
+  .topbar h1 { font-size: 18px; font-weight: 600; color: var(--accent); }
+  .topbar .spacer { flex: 1; }
+  .topbar .who { color: var(--muted); font-size: 13px; }
+  button {
+    font-family: inherit; font-size: 13px; cursor: pointer;
+    border: none; border-radius: 6px; padding: 7px 14px;
+    background: #e8ecf3; color: var(--text); transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.danger { background: var(--danger); color: #fff; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px; }
+
+  /* 登录卡 */
+  .login-card {
+    max-width: 380px; margin: 80px auto; background: var(--panel);
+    border-radius: 12px; padding: 32px; box-shadow: 0 2px 12px rgba(0,0,0,.06);
+  }
+  .login-card h2 { font-size: 18px; margin-bottom: 4px; }
+  .login-card .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; margin-bottom: 4px; color: var(--muted); }
+  .field input {
+    width: 100%; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 6px; outline: none;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .err { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+  /* 统计卡片 */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--panel); border-radius: 10px; padding: 16px; }
+  .card .label { font-size: 12px; color: var(--muted); }
+  .card .num { font-size: 26px; font-weight: 600; margin-top: 2px; }
+
+  .admin-bar { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; }
+  .admin-bar .badge {
+    font-size: 12px; color: var(--accent-dk); background: #eaf0ff;
+    padding: 3px 10px; border-radius: 10px;
+  }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; min-width: 200px; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 6px; outline: none; }
+  .toolbar .grow:focus { border-color: var(--accent); }
+
+  .table-wrap { background: var(--panel); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { background: #f7f9fc; font-weight: 600; color: var(--muted); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbfd; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .tag.ok { background: #e8f8f0; color: var(--success); }
+  .tag.out { background: #fdecea; color: var(--danger); }
+  .empty { text-align: center; color: var(--muted); padding: 40px; font-size: 14px; }
+
+  .pager { display: flex; align-items: center; gap: 10px; justify-content: center; padding: 14px; }
+  .pager span { font-size: 13px; color: var(--muted); }
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: #2c3e50; color: #fff; padding: 10px 20px; border-radius: 8px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 99;
+  }
+  .toast.show { opacity: 1; }
+  .toast.err { background: var(--danger); }
+
+  /* 模态框 */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+  }
+  .modal {
+    background: var(--panel); border-radius: 12px; padding: 24px;
+    width: 380px; max-width: 92vw; box-shadow: 0 8px 30px rgba(0,0,0,.18);
+  }
+  .modal h3 { font-size: 16px; margin-bottom: 14px; }
+  .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>📚 图书管理系统</h1>
+    <div class="spacer"></div>
+    <span class="who" id="who"></span>
+    <button class="small" id="btn-logout" style="display:none">退出</button>
+  </div>
+
+  <!-- 登录 -->
+  <div class="wrap" id="login-view">
+    <div class="login-card">
+      <h2>登录</h2>
+      <div class="sub">默认管理员：admin / admin123</div>
+      <div class="field">
+        <label>用户名</label>
+        <input id="login-user" placeholder="用户名">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input id="login-pwd" type="password" placeholder="密码">
+      </div>
+      <button class="primary" id="btn-login" style="width:100%">登 录</button>
+      <div class="err" id="login-err"></div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div class="wrap" id="main-view" style="display:none">
+    <div class="cards">
+      <div class="card"><div class="label">藏书总数</div><div class="num" id="s-total">-</div></div>
+      <div class="card"><div class="label">在架可借</div><div class="num" id="s-avail">-</div></div>
+      <div class="card"><div class="label">已借出</div><div class="num" id="s-borrowed">-</div></div>
+      <div class="card"><div class="label">我未归还</div><div class="num" id="s-mine">-</div></div>
+    </div>
+
+    <!-- 管理员工具栏（仅管理员可见） -->
+    <div class="admin-bar" id="admin-bar" style="display:none">
+      <span class="badge">管理员</span>
+      <button class="primary small" id="btn-add-book">＋ 新增图书</button>
+    </div>
+
+    <div class="toolbar">
+      <input class="grow" id="search-input" placeholder="搜索书名 / 作者…">
+      <button class="primary" id="btn-search">搜索</button>
+      <button id="btn-reset">全部</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>书名</th><th>作者</th><th>分类</th><th>状态</th><th>操作</th></tr>
+        </thead>
+        <tbody id="book-rows"></tbody>
+      </table>
+      <div class="empty" id="book-empty" style="display:none">没有找到图书</div>
+      <div class="pager">
+        <button class="small" id="btn-prev">上一页</button>
+        <span id="page-info">第 1 页</span>
+        <button class="small" id="btn-next">下一页</button>
+      </div>
+    </div>
+
+    <h3 style="margin:22px 0 10px; font-size:15px">我的借阅</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>书名</th><th>借出时间</th><th>应还时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="my-rows"></tbody>
+      </table>
+      <div class="empty" id="my-empty" style="display:none">你当前没有借阅的图书</div>
+    </div>
+
+    <h3 style="margin:22px 0 10px; font-size:15px; display:flex; align-items:center; gap:10px">
+      我的预约
+      <button class="small" id="btn-res-history">显示历史</button>
+    </h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>书名</th><th>预约时间</th><th>状态</th><th>操作</th></tr>
+        </thead>
+        <tbody id="res-rows"></tbody>
+      </table>
+      <div class="empty" id="res-empty" style="display:none">你还没有预约任何图书</div>
+    </div>
+  </div>
+
+  <!-- 新增 / 编辑图书 模态框 -->
+  <div class="modal-mask" id="modal-mask" style="display:none">
+    <div class="modal">
+      <h3 id="modal-title">新增图书</h3>
+      <div class="field">
+        <label>书名</label>
+        <input id="f-title" placeholder="书名">
+      </div>
+      <div class="field">
+        <label>作者</label>
+        <input id="f-author" placeholder="作者">
+      </div>
+      <div class="field">
+        <label>分类</label>
+        <input id="f-category" placeholder="分类">
+      </div>
+      <div class="err" id="modal-err"></div>
+      <div class="actions">
+        <button id="btn-cancel-modal">取消</button>
+        <button class="primary" id="btn-save-book">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let token = null, currentUser = null, isAdmin = false, page = 1, pageSize = 10;
+  let myReserveBookIds = new Set(), includeResHistory = false;
+  let currentQuery = "", booksCache = [], editingId = null;
+
+  // ===== 基础请求封装 =====
+  async function api(method, path, body) {
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (token) opts.headers["Authorization"] = "Bearer " + token;
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const res = await fetch(path, opts);
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.message || ("请求失败（" + res.status + "）"));
+    }
+    return data.data;
+  }
+
+  function toast(msg, isErr) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isErr ? " err" : "");
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.className = "toast", 2400);
+  }
+
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // ===== 登录 / 登出 =====
+  async function login() {
+    const u = $("login-user").value.trim(), p = $("login-pwd").value;
+    if (!u || !p) { $("login-err").textContent = "请输入用户名和密码"; return; }
+    $("login-err").textContent = "";
+    try {
+      const d = await api("POST", "/api/login", { username: u, password: p });
+      token = d.token; currentUser = d.username; isAdmin = !!d.is_admin;
+      $("login-view").style.display = "none";
+      $("main-view").style.display = "block";
+      $("btn-logout").style.display = "";
+      $("who").textContent = "当前用户：" + currentUser + (isAdmin ? "（管理员）" : "");
+      $("admin-bar").style.display = isAdmin ? "flex" : "none";
+      $("login-pwd").value = "";
+      await refresh();
+    } catch (e) {
+      $("login-err").textContent = e.message;
+    }
+  }
+  function logout() {
+    token = null; currentUser = null; isAdmin = false; page = 1;
+    $("admin-bar").style.display = "none";
+    $("main-view").style.display = "none";
+    $("login-view").style.display = "block";
+    $("btn-logout").style.display = "none";
+    $("who").textContent = "";
+  }
+
+  // ===== 数据加载 =====
+  async function refresh() {
+    try {
+      await Promise.all([loadStats(), loadBooks(), loadMyBorrows(), loadMyReservations()]);
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function loadStats() {
+    const dash = await api("GET", "/api/stats/dashboard");
+    const mine = await api("GET", "/api/my/summary");
+    $("s-total").textContent = dash.total_book;
+    $("s-avail").textContent = dash.available;
+    $("s-borrowed").textContent = dash.borrowed;
+    $("s-mine").textContent = mine.borrowed;
+  }
+
+  async function loadBooks() {
+    let path = "/api/books?page=" + page + "&size=" + pageSize;
+    if (currentQuery) path += "&q=" + encodeURIComponent(currentQuery);
+    const d = await api("GET", path);
+    booksCache = d.books;
+    const rows = $("book-rows");
+    rows.innerHTML = "";
+    $("book-empty").style.display = d.books.length ? "none" : "";
+    d.books.forEach((b) => {
+      const tr = document.createElement("tr");
+      const st = b.is_borrow
+        ? '<span class="tag out">已借出</span>'
+        : '<span class="tag ok">在架可借</span>';
+      let action;
+      if (b.is_borrow) {
+        action = myReserveBookIds.has(b.id)
+          ? '<button class="small" disabled>已预约</button>'
+          : '<button class="small" data-reserve="' + b.id + '">预约</button>';
+      } else {
+        action = '<button class="small primary" data-borrow="' + b.id + '">借阅</button>';
+      }
+      if (isAdmin) {
+        action +=
+          ' <button class="small" data-edit="' + b.id + '">编辑</button>' +
+          ' <button class="small danger" data-del="' + b.id + '">删除</button>';
+      }
+      tr.innerHTML =
+        "<td>" + b.id + "</td>" +
+        "<td>" + esc(b.title) + "</td>" +
+        "<td>" + esc(b.author || "—") + "</td>" +
+        "<td>" + esc(b.category || "—") + "</td>" +
+        "<td>" + st + "</td>" +
+        "<td>" + action + "</td>";
+      rows.appendChild(tr);
+    });
+    $("page-info").textContent = "第 " + page + " 页";
+    $("btn-prev").disabled = page <= 1;
+    $("btn-next").disabled = d.books.length < pageSize;
+  }
+
+  // ===== 借阅 / 归还 =====
+  async function borrow(bookId) {
+    try {
+      const d = await api("POST", "/api/borrow", { book_id: bookId });
+      toast(d.message || "借阅成功");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function returnBook(bookId) {
+    try {
+      const d = await api("POST", "/api/return", { book_id: bookId });
+      toast(d.penalty > 0 ? ("归还成功，产生罚款 " + d.penalty + " 元") : "归还成功");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function loadMyBorrows() {
+    const d = await api("GET", "/api/my/current");
+    const rows = $("my-rows");
+    rows.innerHTML = "";
+    $("my-empty").style.display = d.items.length ? "none" : "";
+    d.items.forEach((it) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(it.title) + "</td>" +
+        "<td>" + esc((it.borrow_time || "").slice(0, 16)) + "</td>" +
+        "<td>" + esc((it.deadline || "").slice(0, 16)) + "</td>" +
+        '<td><button class="small danger" data-return="' + it.book_id + '">归还</button></td>';
+      rows.appendChild(tr);
+    });
+  }
+
+  // ===== 预约 =====
+  async function reserveBook(bookId) {
+    try {
+      const d = await api("POST", "/api/reserve", { book_id: bookId });
+      toast(d.message || "预约成功");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function cancelReserve(bookId) {
+    if (!confirm("确定取消该预约？")) return;
+    try {
+      const d = await api("POST", "/api/reserve/cancel", { book_id: bookId });
+      toast(d.message || "已取消");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function loadMyReservations() {
+    const path = "/api/my/reservations" + (includeResHistory ? "?history=1" : "");
+    const d = await api("GET", path);
+    myReserveBookIds = new Set(d.items.map(it => it.book_id));
+    const rows = $("res-rows");
+    rows.innerHTML = "";
+    $("res-empty").style.display = d.items.length ? "none" : "";
+    d.items.forEach((it) => {
+      const tr = document.createElement("tr");
+      let action;
+      if (it.status === "排队中") {
+        action = '<button class="small" data-cancel="' + it.book_id + '">取消</button>';
+      } else if (it.status === "已到书待取") {
+        action = '<button class="small primary" data-borrow="' + it.book_id + '">去借阅</button>';
+      } else {
+        action = '<span style="color:var(--muted)">—</span>';
+      }
+      tr.innerHTML =
+        "<td>" + esc(it.title) + "</td>" +
+        "<td>" + esc((it.reserve_time || "").slice(0, 16)) + "</td>" +
+        "<td>" + esc(it.status) + "</td>" +
+        "<td>" + action + "</td>";
+      rows.appendChild(tr);
+    });
+  }
+
+  // ===== 管理员：新增 / 编辑 / 删除 =====
+  function openBookModal(bookId) {
+    editingId = bookId || null;
+    $("modal-err").textContent = "";
+    if (bookId) {
+      const b = booksCache.find(x => x.id === bookId);
+      $("modal-title").textContent = "编辑图书 #" + bookId;
+      $("f-title").value = b ? b.title : "";
+      $("f-author").value = b ? b.author : "";
+      $("f-category").value = b ? b.category : "";
+    } else {
+      $("modal-title").textContent = "新增图书";
+      $("f-title").value = ""; $("f-author").value = ""; $("f-category").value = "";
+    }
+    $("modal-mask").style.display = "flex";
+    $("f-title").focus();
+  }
+
+  function closeModal() { $("modal-mask").style.display = "none"; }
+
+  async function saveBook() {
+    const title = $("f-title").value.trim();
+    const author = $("f-author").value.trim();
+    const category = $("f-category").value.trim();
+    if (!title || !author || !category) {
+      $("modal-err").textContent = "书名、作者、分类都需填写";
+      return;
+    }
+    $("modal-err").textContent = "";
+    const payload = { title, author, category };
+    try {
+      if (editingId) {
+        await api("PUT", "/api/books/" + editingId, payload);
+        toast("已保存修改");
+      } else {
+        await api("POST", "/api/books", payload);
+        toast("新增成功");
+      }
+      closeModal();
+      await refresh();
+    } catch (e) { $("modal-err").textContent = e.message; }
+  }
+
+  async function deleteBook(bookId) {
+    const b = booksCache.find(x => x.id === bookId);
+    const name = b ? b.title : ("#" + bookId);
+    if (!confirm("确定删除《" + name + "》？若存在未归还借阅将被拒绝。")) return;
+    try {
+      await api("DELETE", "/api/books/" + bookId);
+      toast("已删除");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ===== 事件绑定 =====
+  $("btn-login").onclick = login;
+  $("login-pwd").onkeydown = (e) => { if (e.key === "Enter") login(); };
+  $("btn-logout").onclick = logout;
+  $("btn-search").onclick = () => { currentQuery = $("search-input").value.trim(); page = 1; loadBooks(); };
+  $("search-input").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(); };
+  $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; page = 1; loadBooks(); };
+  $("btn-prev").onclick = () => { page--; loadBooks(); };
+  $("btn-next").onclick = () => { page++; loadBooks(); };
+  $("btn-add-book").onclick = () => openBookModal(null);
+  $("btn-cancel-modal").onclick = closeModal;
+  $("btn-save-book").onclick = saveBook;
+  $("btn-res-history").onclick = () => {
+    includeResHistory = !includeResHistory;
+    $("btn-res-history").textContent = includeResHistory ? "隐藏历史" : "显示历史";
+    loadMyReservations();
+  };
+  $("modal-mask").addEventListener("click", (e) => { if (e.target === $("modal-mask")) closeModal(); });
+  $("book-rows").addEventListener("click", (e) => {
+    const borrowBtn = e.target.closest("button[data-borrow]");
+    if (borrowBtn) { borrow(parseInt(borrowBtn.dataset.borrow)); return; }
+    const reserveBtn = e.target.closest("button[data-reserve]");
+    if (reserveBtn) { reserveBook(parseInt(reserveBtn.dataset.reserve)); return; }
+    const editBtn = e.target.closest("button[data-edit]");
+    if (editBtn) { openBookModal(parseInt(editBtn.dataset.edit)); return; }
+    const delBtn = e.target.closest("button[data-del]");
+    if (delBtn) { deleteBook(parseInt(delBtn.dataset.del)); }
+  });
+  $("my-rows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-return]");
+    if (btn) returnBook(parseInt(btn.dataset.return));
+  });
+  $("res-rows").addEventListener("click", (e) => {
+    const borrowBtn = e.target.closest("button[data-borrow]");
+    if (borrowBtn) { borrow(parseInt(borrowBtn.dataset.borrow)); return; }
+    const cancelBtn = e.target.closest("button[data-cancel]");
+    if (cancelBtn) cancelReserve(parseInt(cancelBtn.dataset.cancel));
+  });
+</script>
+</body>
+</html>

@@ -63,10 +63,13 @@ def cancel(user_id, book_id):
 
 
 def my_reservations(user_id, include_history=False):
-    """我的预约列表（dict 列表）"""
+    """我的预约列表（dict 列表）
+
+    含 book_id，便于前端按书禁用重复预约 / 取消预约。
+    """
     return [
         {"id": r[0], "title": r[1], "reserve_time": r[2],
-         "status": status_text(r[3]), "notify_time": r[4]}
+         "status": status_text(r[3]), "notify_time": r[4], "book_id": r[5]}
         for r in reservation_repo.find_by_user(user_id, active_only=not include_history)
     ]
 

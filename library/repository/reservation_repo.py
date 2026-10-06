@@ -69,9 +69,10 @@ def find_by_user(user_id, active_only=True):
     """某用户的预约列表
 
     :param active_only: True 只返回 waiting/ready（未完成的）
+    返回列顺序：(id, title, reserve_time, status, notify_time, book_id)
     """
     sql = """
-        SELECT r.id, b.title, r.reserve_time, r.status, r.notify_time
+        SELECT r.id, b.title, r.reserve_time, r.status, r.notify_time, r.book_id
         FROM reservation r
         LEFT JOIN book b ON r.book_id = b.id
         WHERE r.user_id = ?

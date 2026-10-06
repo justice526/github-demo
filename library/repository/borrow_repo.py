@@ -52,6 +52,20 @@ def find_by_user(user_id):
     """, (user_id,)))
 
 
+def find_active_by_user(user_id):
+    """某用户**未归还**的记录（含 book_id，供 Web 层归还操作定位图书）
+
+    返回 (record_id, book_id, title, borrow_time, deadline) 元组列表。
+    """
+    return _to_tuples(db.query_all("""
+        SELECT br.id, br.book_id, b.title, br.borrow_time, br.return_deadline
+        FROM borrow_record br
+        LEFT JOIN book b ON br.book_id = b.id
+        WHERE br.user_id = ? AND br.return_time IS NULL
+        ORDER BY br.borrow_time DESC
+    """, (user_id,)))
+
+
 def find_all():
     """全部借阅记录（导出用）"""
     return _to_tuples(db.query_all("""

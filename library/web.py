@@ -39,9 +39,14 @@
     GET    /api/books/rank         热门借阅排行
     GET    /api/books/<id>/rating  图书评分
     POST   /api/books/<id>/rating  评分 {score, comment}
+    POST   /api/reserve             预约图书 {book_id}
+    POST   /api/reserve/cancel      取消预约 {book_id}
+    GET    /api/my/reservations     我的预约（?history=1 含历史）
+    GET    /api/books/<id>/reservations  某书预约队列与人数
 """
 
 import json
+import os
 import re
 import secrets
 import sys
@@ -52,7 +57,7 @@ from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
                          ValidationError, BusinessRuleError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection
-from repository import book_repo
+from repository import book_repo, borrow_repo
 from service import (book_service, user_service, borrow_service,
                      rating_service, reservation_service, tag_service)
 
@@ -176,7 +181,28 @@ class ApiHandler(BaseHTTPRequestHandler):
             _fail(self, AppError(f"服务器内部错误", code="internal_error", detail=str(e)))
 
     def do_GET(self):
+        # 首页与静态资源：直接返回前端，其余走 API 路由
+        if self.path in ("/", "/index.html"):
+            self._serve_homepage()
+            return
         self._route("GET")
+
+    def _serve_homepage(self):
+        """返回自包含的单页前端（static/index.html）"""
+        base = os.path.dirname(os.path.abspath(__file__))
+        index_path = os.path.join(base, "static", "index.html")
+        try:
+            with open(index_path, "r", encoding="utf-8") as f:
+                body = f.read().encode("utf-8")
+        except FileNotFoundError:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         self._route("POST")
@@ -219,7 +245,8 @@ def login(handler):
     uid = user_service.login(data.get("username", ""), data.get("password", ""))
     return _ok(handler, {"token": _issue_token(uid),
                          "user_id": uid,
-                         "username": data.get("username")})
+                         "username": data.get("username"),
+                         "is_admin": bool(user_service.is_admin(uid))})
 
 
 @_register("POST", r"/api/register")
@@ -329,6 +356,17 @@ def my_records(handler):
     return _ok(handler, {"records": borrow_service.my_records(uid)})
 
 
+@_register("GET", r"/api/my/current")
+def my_current(handler):
+    """我当前未归还的借阅（含 book_id，供前端归还操作）"""
+    uid = _require_user(handler)
+    rows = borrow_repo.find_active_by_user(uid)
+    return _ok(handler, {"items": [
+        {"record_id": r[0], "book_id": r[1], "title": r[2],
+         "borrow_time": r[3], "deadline": r[4]} for r in rows
+    ]})
+
+
 @_register("GET", r"/api/my/summary")
 def my_summary(handler):
     uid = _require_user(handler)
@@ -348,6 +386,43 @@ def rate(handler, bid):
     data = _read_json(handler)
     rating_service.rate(uid, int(bid), data.get("score"), data.get("comment", ""))
     return _ok(handler, {"rated": True})
+
+
+# ---- 预约 ----
+
+@_register("POST", r"/api/reserve")
+def reserve_book(handler):
+    uid = _require_user(handler)
+    data = _read_json(handler)
+    ok, msg = reservation_service.reserve(uid, int(data.get("book_id", 0)))
+    if not ok:
+        raise BusinessRuleError(msg)
+    return _ok(handler, {"message": msg})
+
+
+@_register("POST", r"/api/reserve/cancel")
+def cancel_reserve(handler):
+    uid = _require_user(handler)
+    data = _read_json(handler)
+    ok, msg = reservation_service.cancel(uid, int(data.get("book_id", 0)))
+    if not ok:
+        raise BusinessRuleError(msg)
+    return _ok(handler, {"message": msg})
+
+
+@_register("GET", r"/api/my/reservations")
+def my_reservations(handler):
+    uid = _require_user(handler)
+    qs = parse_qs(urlparse(handler.path).query)
+    history = (qs.get("history") or ["0"])[0] in ("1", "true", "yes")
+    return _ok(handler, {"items": reservation_service.my_reservations(uid, include_history=history)})
+
+
+@_register("GET", r"/api/books/(?P<bid>\d+)/reservations")
+def book_queue(handler, bid):
+    _require_user(handler)
+    return _ok(handler, {"queue": reservation_service.queue_of(int(bid)),
+                         "count": reservation_service.reservation_count(int(bid))})
 
 
 # ---- 统计 ----
