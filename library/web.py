@@ -272,7 +272,8 @@ def list_books(handler):
         books = book_service.list_by_category(category)
     else:
         books = book_service.page(page, size)[0]
-    return _ok(handler, {"books": [_book_dict(b) for b in books]})
+    rmap = rating_service.ratings_map()
+    return _ok(handler, {"books": [_book_dict(b, rmap) for b in books]})
 
 
 @_register("GET", r"/api/books/rank")
@@ -286,7 +287,7 @@ def rank_books(handler):
 def get_book(handler, bid):
     book = book_service.get_detail(int(bid))
     d = _book_dict(book)
-    d["rating"] = rating_service.get_rating(int(bid))
+    d["rating"] = rating_service.get_rating(int(bid), user_id=_require_user(handler))
     d["tags"] = tag_service.book_tags(int(bid))
     return _ok(handler, d)
 
@@ -377,7 +378,8 @@ def my_summary(handler):
 
 @_register("GET", r"/api/books/(?P<bid>\d+)/rating")
 def get_rating(handler, bid):
-    return _ok(handler, rating_service.get_rating(int(bid)))
+    uid = _require_user(handler)
+    return _ok(handler, rating_service.get_rating(int(bid), user_id=uid))
 
 
 @_register("POST", r"/api/books/(?P<bid>\d+)/rating")
@@ -432,12 +434,19 @@ def dashboard(handler):
     return _ok(handler, book_service.dashboard())
 
 
-def _book_dict(book):
-    """把 (id, title, author, category, is_borrow) 元组转成 JSON 友好的 dict"""
-    return {
+def _book_dict(book, rmap=None):
+    """把 (id, title, author, category, is_borrow) 元组转成 JSON 友好的 dict
+    rmap: book_id -> (avg, count)，列表页用于附带均分（一次查询，避免 N+1）
+    """
+    d = {
         "id": book[0], "title": book[1], "author": book[2],
         "category": book[3], "is_borrow": bool(book[4]),
     }
+    if rmap is not None:
+        avg, cnt = rmap.get(book[0], (0, 0))
+        d["avg"] = round(float(avg), 1) if avg else 0.0
+        d["count"] = cnt
+    return d
 
 
 def run(host="127.0.0.1", port=8000):

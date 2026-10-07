@@ -108,6 +108,10 @@
   }
   .modal h3 { font-size: 16px; margin-bottom: 14px; }
   .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+  .rate-badge { font-size: 12px; color: var(--warn); margin-left: 6px; }
+  .stars { display: flex; gap: 4px; }
+  .stars span { font-size: 28px; line-height: 1; cursor: pointer; color: #d4d9e2; transition: color .1s; user-select: none; }
+  .stars span.on { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -222,6 +226,26 @@
     </div>
   </div>
 
+  <!-- 评分 模态框 -->
+  <div class="modal-mask" id="rate-mask" style="display:none">
+    <div class="modal">
+      <h3 id="rate-title">给《》评分</h3>
+      <div id="rate-cur" style="color:var(--muted); font-size:13px; margin-bottom:8px"></div>
+      <div class="stars" id="rate-stars">
+        <span data-s="1">★</span><span data-s="2">★</span><span data-s="3">★</span><span data-s="4">★</span><span data-s="5">★</span>
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label>评论（可选，≤200 字）</label>
+        <input id="rate-comment" placeholder="一句话评价…" maxlength="200">
+      </div>
+      <div class="err" id="rate-err"></div>
+      <div class="actions">
+        <button id="btn-cancel-rate">取消</button>
+        <button class="primary" id="btn-submit-rate">提交评分</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
 <script>
@@ -313,6 +337,9 @@
       const st = b.is_borrow
         ? '<span class="tag out">已借出</span>'
         : '<span class="tag ok">在架可借</span>';
+      const badge = (b.count > 0)
+        ? ' <span class="rate-badge" title="平均分 ' + b.avg + '">★' + b.avg + '·' + b.count + '</span>'
+        : '';
       let action;
       if (b.is_borrow) {
         action = myReserveBookIds.has(b.id)
@@ -321,6 +348,7 @@
       } else {
         action = '<button class="small primary" data-borrow="' + b.id + '">借阅</button>';
       }
+      action += ' <button class="small" data-rate="' + b.id + '">评分</button>';
       if (isAdmin) {
         action +=
           ' <button class="small" data-edit="' + b.id + '">编辑</button>' +
@@ -331,7 +359,7 @@
         "<td>" + esc(b.title) + "</td>" +
         "<td>" + esc(b.author || "—") + "</td>" +
         "<td>" + esc(b.category || "—") + "</td>" +
-        "<td>" + st + "</td>" +
+        "<td>" + st + badge + "</td>" +
         "<td>" + action + "</td>";
       rows.appendChild(tr);
     });
@@ -417,6 +445,48 @@
     });
   }
 
+  // ===== 评分 =====
+  let ratingBookId = null, ratingScore = 0;
+
+  function setStars(n) {
+    ratingScore = n;
+    $("rate-stars").querySelectorAll("span").forEach(s => {
+      s.classList.toggle("on", parseInt(s.dataset.s, 10) <= n);
+    });
+  }
+
+  async function openRateModal(bookId) {
+    ratingBookId = bookId;
+    const b = booksCache.find(x => x.id === bookId);
+    $("rate-title").textContent = "给《" + (b ? b.title : ("#" + bookId)) + "》评分";
+    $("rate-comment").value = "";
+    $("rate-err").textContent = "";
+    setStars(0);
+    try {
+      const d = await api("GET", "/api/books/" + bookId + "/rating");
+      $("rate-cur").textContent = d.count > 0
+        ? ("当前均分 " + d.avg + "（" + d.count + " 人评分）")
+        : "暂无评分";
+      if (d.my_score) { setStars(d.my_score); $("rate-comment").value = d.my_comment || ""; }
+    } catch (e) {
+      $("rate-cur").textContent = "";
+      $("rate-err").textContent = e.message;
+    }
+    $("rate-mask").style.display = "flex";
+  }
+
+  async function submitRate() {
+    if (!ratingScore) { $("rate-err").textContent = "请先点选星级"; return; }
+    $("rate-err").textContent = "";
+    try {
+      await api("POST", "/api/books/" + ratingBookId + "/rating",
+                { score: ratingScore, comment: $("rate-comment").value.trim() });
+      toast("评分成功");
+      $("rate-mask").style.display = "none";
+      await refresh();
+    } catch (e) { $("rate-err").textContent = e.message; }
+  }
+
   // ===== 管理员：新增 / 编辑 / 删除 =====
   function openBookModal(bookId) {
     editingId = bookId || null;
@@ -483,17 +553,26 @@
   $("btn-add-book").onclick = () => openBookModal(null);
   $("btn-cancel-modal").onclick = closeModal;
   $("btn-save-book").onclick = saveBook;
+  $("btn-cancel-rate").onclick = () => { $("rate-mask").style.display = "none"; };
+  $("btn-submit-rate").onclick = submitRate;
   $("btn-res-history").onclick = () => {
     includeResHistory = !includeResHistory;
     $("btn-res-history").textContent = includeResHistory ? "隐藏历史" : "显示历史";
     loadMyReservations();
   };
   $("modal-mask").addEventListener("click", (e) => { if (e.target === $("modal-mask")) closeModal(); });
+  $("rate-mask").addEventListener("click", (e) => { if (e.target === $("rate-mask")) $("rate-mask").style.display = "none"; });
+  $("rate-stars").addEventListener("click", (e) => {
+    const s = e.target.closest("span[data-s]");
+    if (s) setStars(parseInt(s.dataset.s, 10));
+  });
   $("book-rows").addEventListener("click", (e) => {
     const borrowBtn = e.target.closest("button[data-borrow]");
     if (borrowBtn) { borrow(parseInt(borrowBtn.dataset.borrow)); return; }
     const reserveBtn = e.target.closest("button[data-reserve]");
     if (reserveBtn) { reserveBook(parseInt(reserveBtn.dataset.reserve)); return; }
+    const rateBtn = e.target.closest("button[data-rate]");
+    if (rateBtn) { openRateModal(parseInt(rateBtn.dataset.rate)); return; }
     const editBtn = e.target.closest("button[data-edit]");
     if (editBtn) { openBookModal(parseInt(editBtn.dataset.edit)); return; }
     const delBtn = e.target.closest("button[data-del]");
