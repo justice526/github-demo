@@ -37,6 +37,7 @@
     GET    /api/my/summary         我的借阅摘要
     GET    /api/stats/dashboard    统计仪表盘
     GET    /api/books/rank         热门借阅排行
+    GET    /api/books/top-rated    高分榜（按均分，?top=）
     GET    /api/books/<id>/rating  图书评分
     POST   /api/books/<id>/rating  评分 {score, comment}
     POST   /api/reserve             预约图书 {book_id}
@@ -281,6 +282,13 @@ def rank_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
     top_n = int((qs.get("top") or ["10"])[0])
     return _ok(handler, {"rank": book_service.hot_rank(top_n)})
+
+
+@_register("GET", r"/api/books/top-rated")
+def top_rated_books(handler):
+    qs = parse_qs(urlparse(handler.path).query)
+    top_n = int((qs.get("top") or ["10"])[0])
+    return _ok(handler, {"items": rating_service.top_rated(top_n)})
 
 
 @_register("GET", r"/api/books/(?P<bid>\d+)")

@@ -97,6 +97,21 @@
   .toast.show { opacity: 1; }
   .toast.err { background: var(--danger); }
 
+  /* 排行榜 */
+  .rank-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+  @media (max-width: 680px) { .rank-grid { grid-template-columns: 1fr; } }
+  .rank-head { padding: 10px 14px; background: #f7f9fc; font-weight: 600; color: var(--muted);
+    font-size: 13px; border-bottom: 1px solid var(--line); }
+  .rank-list { list-style: none; margin: 0; padding: 6px 0; }
+  .rank-list li { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+  .rank-list li:last-child { border-bottom: none; }
+  .rank-list li:hover { background: #fafbfd; }
+  .rank-no { width: 22px; height: 22px; flex: none; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; }
+  .rank-meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+
   /* 模态框 */
   .modal-mask {
     position: fixed; inset: 0; background: rgba(0,0,0,.35);
@@ -199,6 +214,18 @@
         <tbody id="res-rows"></tbody>
       </table>
       <div class="empty" id="res-empty" style="display:none">你还没有预约任何图书</div>
+    </div>
+
+    <h3 style="margin:22px 0 10px; font-size:15px">排行榜</h3>
+    <div class="rank-grid">
+      <div class="table-wrap">
+        <div class="rank-head">🔥 热门借阅</div>
+        <ol class="rank-list" id="rank-hot"></ol>
+      </div>
+      <div class="table-wrap">
+        <div class="rank-head">⭐ 高分榜</div>
+        <ol class="rank-list" id="rank-top"></ol>
+      </div>
     </div>
   </div>
 
@@ -311,7 +338,8 @@
   // ===== 数据加载 =====
   async function refresh() {
     try {
-      await Promise.all([loadStats(), loadBooks(), loadMyBorrows(), loadMyReservations()]);
+      await Promise.all([loadStats(), loadBooks(), loadMyBorrows(),
+                          loadMyReservations(), loadRanks()]);
     } catch (e) { toast(e.message, true); }
   }
 
@@ -455,10 +483,9 @@
     });
   }
 
-  async function openRateModal(bookId) {
+  async function openRateModal(bookId, title) {
     ratingBookId = bookId;
-    const b = booksCache.find(x => x.id === bookId);
-    $("rate-title").textContent = "给《" + (b ? b.title : ("#" + bookId)) + "》评分";
+    $("rate-title").textContent = "给《" + (title || ("#" + bookId)) + "》评分";
     $("rate-comment").value = "";
     $("rate-err").textContent = "";
     setStars(0);
@@ -485,6 +512,36 @@
       $("rate-mask").style.display = "none";
       await refresh();
     } catch (e) { $("rate-err").textContent = e.message; }
+  }
+
+  // ===== 排行榜 =====
+  async function loadRanks() {
+    const [hot, top] = await Promise.all([
+      api("GET", "/api/books/rank?top=8"),
+      api("GET", "/api/books/top-rated?top=8"),
+    ]);
+    const hotList = $("rank-hot");
+    hotList.innerHTML = "";
+    (hot.rank || []).forEach((it, i) => {
+      const li = document.createElement("li");
+      li.dataset.rate = it[0];
+      li.dataset.title = it[1];
+      li.innerHTML = '<span class="rank-no">' + (i + 1) + '</span>' +
+        '<span>' + esc(it[1]) + '</span>' +
+        '<span class="rank-meta">' + (it[3] || 0) + ' 次借阅</span>';
+      hotList.appendChild(li);
+    });
+    const topList = $("rank-top");
+    topList.innerHTML = "";
+    (top.items || []).forEach((it, i) => {
+      const li = document.createElement("li");
+      li.dataset.rate = it.book_id;
+      li.dataset.title = it.title;
+      li.innerHTML = '<span class="rank-no">' + (i + 1) + '</span>' +
+        '<span>' + esc(it.title) + '</span>' +
+        '<span class="rank-meta">★' + it.avg + '·' + it.count + '</span>';
+      topList.appendChild(li);
+    });
   }
 
   // ===== 管理员：新增 / 编辑 / 删除 =====
@@ -566,13 +623,26 @@
     const s = e.target.closest("span[data-s]");
     if (s) setStars(parseInt(s.dataset.s, 10));
   });
+  function bindRank(id) {
+    $(id).addEventListener("click", (e) => {
+      const li = e.target.closest("li[data-rate]");
+      if (li) openRateModal(parseInt(li.dataset.rate), li.dataset.title || null);
+    });
+  }
+  bindRank("rank-hot");
+  bindRank("rank-top");
   $("book-rows").addEventListener("click", (e) => {
     const borrowBtn = e.target.closest("button[data-borrow]");
     if (borrowBtn) { borrow(parseInt(borrowBtn.dataset.borrow)); return; }
     const reserveBtn = e.target.closest("button[data-reserve]");
     if (reserveBtn) { reserveBook(parseInt(reserveBtn.dataset.reserve)); return; }
     const rateBtn = e.target.closest("button[data-rate]");
-    if (rateBtn) { openRateModal(parseInt(rateBtn.dataset.rate)); return; }
+    if (rateBtn) {
+      const rid = parseInt(rateBtn.dataset.rate);
+      const b = booksCache.find(x => x.id === rid);
+      openRateModal(rid, b ? b.title : null);
+      return;
+    }
     const editBtn = e.target.closest("button[data-edit]");
     if (editBtn) { openBookModal(parseInt(editBtn.dataset.edit)); return; }
     const delBtn = e.target.closest("button[data-del]");
