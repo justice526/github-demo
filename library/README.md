@@ -235,22 +235,30 @@ python web.py          # 默认 127.0.0.1:8000
 python web.py 9000     # 指定端口
 ```
 
+> 启动后访问 `/` 即打开内置单页前端（登录后可借还、预约、评分、管理图书、查看排行榜）。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查 |
-| POST | `/api/login` | 登录，返回 token |
+| POST | `/api/login` | 登录，返回 token 与 `is_admin` |
 | POST | `/api/register` | 注册 |
-| GET | `/api/books` | 图书列表（`?q=关键词&category=分类&page=&size=`） |
+| GET | `/api/books` | 图书列表（`?q=关键词&category=分类&page=&size=`，附均分/人数） |
 | GET | `/api/books/<id>` | 图书详情（含评分与标签） |
 | POST / PUT / DELETE | `/api/books[/<id>]` | 增改删（管理员，需 token） |
 | POST | `/api/borrow` | 借阅 `{book_id}` |
 | POST | `/api/return` | 归还 `{book_id}` |
 | POST | `/api/renew` | 续借 `{book_id, days}` |
+| POST | `/api/reserve` | 预约图书 `{book_id}`（仅借出中的书可约） |
+| POST | `/api/reserve/cancel` | 取消预约 `{book_id}` |
+| GET | `/api/my/current` | 我当前未归还的借阅（含 book_id） |
 | GET | `/api/my/records` | 我的借阅记录 |
 | GET | `/api/my/summary` | 我的借阅摘要 |
-| GET | `/api/books/<id>/rating` + POST | 查看 / 提交评分 |
+| GET | `/api/my/reservations` | 我的预约（`?history=1` 含历史） |
+| GET | `/api/books/<id>/reservations` | 某书预约队列与人数 |
+| GET | `/api/books/<id>/rating` + POST | 查看（含我的评分）/ 提交评分 |
 | GET | `/api/stats/dashboard` | 统计仪表盘 |
 | GET | `/api/books/rank` | 借阅排行 |
+| GET | `/api/books/top-rated` | 高分榜（`?top=`） |
 
 **错误码**：类型化异常精确映射 HTTP 状态码
 （400 校验 / 401 未登录 / 403 无权限 / 404 不存在 / 422 业务规则 / 500 服务器错误），
