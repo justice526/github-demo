@@ -62,7 +62,12 @@ def stop_server(server, t):
 
 
 def restore_db():
-    """还原数据库到干净快照（先 gc 释放后台线程持有的 sqlite 连接，再带重试 checkout）"""
+    """还原数据库到干净快照（先关闭主线程连接 + gc 释放后台线程持有的 sqlite 连接，再带重试 checkout）"""
+    try:
+        from core import db
+        db.close_connection()
+    except Exception:
+        pass
     gc.collect()
     time.sleep(0.4)
     for _ in range(10):

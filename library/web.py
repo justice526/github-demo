@@ -25,11 +25,13 @@
     GET    /health                 健康检查
     POST   /api/login              登录，返回 token
     POST   /api/register           注册
-    GET    /api/books              图书列表（?page=&size=&q=&category=）
+    GET    /api/books              图书列表（?page=&size=&q=&category=&tag=）
     GET    /api/books/<id>         图书详情
     POST   /api/books              新增图书（管理员）
     PUT    /api/books/<id>         修改图书
     DELETE /api/books/<id>         删除图书
+    GET    /api/tags               全部标签及每标签书数
+    POST   /api/books/<id>/tags    设置某书标签（管理员，覆盖式 {tags}）
     POST   /api/borrow             借阅 {book_id}
     POST   /api/return             归还 {book_id}
     POST   /api/renew              续借 {book_id, days}
@@ -58,9 +60,14 @@ from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
                          ValidationError, BusinessRuleError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection
-from repository import book_repo, borrow_repo
+from repository import book_repo, borrow_repo, tag_repo
 from service import (book_service, user_service, borrow_service,
                      rating_service, reservation_service, tag_service)
+
+# 标签功能依赖 tag / book_tag 两张表。在模块导入时幂等建表，
+# 保证无论通过 run() 还是直接 ThreadingHTTPServer 启动，表都存在。
+tag_repo.init_table()
+close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
 # ===== 内存 token 表（单机演示用）=====
 # token -> user_id。生产环境应改为 JWT（短时效访问令牌 + 服务端刷新令牌）。
@@ -265,9 +272,12 @@ def list_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
     q = (qs.get("q") or [""])[0]
     category = (qs.get("category") or [""])[0]
+    tag = (qs.get("tag") or [""])[0]
     page = int((qs.get("page") or ["1"])[0])
     size = int((qs.get("size") or ["20"])[0])
-    if q:
+    if tag:
+        books = tag_service.filter_books([tag])
+    elif q:
         books = book_service.search(q)
     elif category:
         books = book_service.list_by_category(category)
@@ -289,6 +299,13 @@ def top_rated_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
     top_n = int((qs.get("top") or ["10"])[0])
     return _ok(handler, {"items": rating_service.top_rated(top_n)})
+
+
+@_register("GET", r"/api/tags")
+def list_tags(handler):
+    """全部标签及每标签被多少本书使用"""
+    tags = [{"name": name, "count": cnt} for name, cnt in tag_service.all_tags()]
+    return _ok(handler, {"tags": tags})
 
 
 @_register("GET", r"/api/books/(?P<bid>\d+)")
@@ -316,6 +333,16 @@ def update_book(handler, bid):
     book_service.update_book(int(bid), data.get("title", ""),
                              data.get("author", ""), data.get("category"))
     return _ok(handler, {"updated": True})
+
+
+@_register("POST", r"/api/books/(?P<bid>\d+)/tags")
+def set_book_tags(handler, bid):
+    _require_admin(handler)
+    data = _read_json(handler)
+    ok, tags, msg = tag_service.set_tags(int(bid), data.get("tags", ""))
+    if not ok:
+        raise NotFoundError(msg)
+    return _ok(handler, {"tags": tags, "message": msg})
 
 
 @_register("DELETE", r"/api/books/(?P<bid>\d+)")

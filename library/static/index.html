@@ -127,6 +127,20 @@
   .stars { display: flex; gap: 4px; }
   .stars span { font-size: 28px; line-height: 1; cursor: pointer; color: #d4d9e2; transition: color .1s; user-select: none; }
   .stars span.on { color: var(--warn); }
+
+  /* 标签云 */
+  .tag-cloud { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tc-label { font-size: 13px; color: var(--muted); flex: none; }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 12px; font-size: 12px;
+    background: #eef1f6; color: var(--text); cursor: pointer;
+    border: 1px solid var(--line); transition: background .12s;
+  }
+  .tag-chip:hover { background: #e3e9f7; }
+  .tag-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tag-chip .c { font-size: 11px; opacity: .7; }
+  .tag-chip.active .c { opacity: .85; }
 </style>
 </head>
 <body>
@@ -174,6 +188,13 @@
       <input class="grow" id="search-input" placeholder="搜索书名 / 作者…">
       <button class="primary" id="btn-search">搜索</button>
       <button id="btn-reset">全部</button>
+    </div>
+
+    <!-- 标签云：点击按标签筛选 -->
+    <div class="tag-cloud" id="tag-cloud" style="display:none">
+      <span class="tc-label">标签：</span>
+      <span id="tag-chips"></span>
+      <button class="small" id="btn-clear-tag" style="display:none">清除标签筛选</button>
     </div>
 
     <div class="table-wrap">
@@ -245,6 +266,10 @@
         <label>分类</label>
         <input id="f-category" placeholder="分类">
       </div>
+      <div class="field">
+        <label>标签（逗号 / 顿号分隔，可选）</label>
+        <input id="f-tags" placeholder="如：经典、计算机、必读">
+      </div>
       <div class="err" id="modal-err"></div>
       <div class="actions">
         <button id="btn-cancel-modal">取消</button>
@@ -279,7 +304,7 @@
   const $ = (id) => document.getElementById(id);
   let token = null, currentUser = null, isAdmin = false, page = 1, pageSize = 10;
   let myReserveBookIds = new Set(), includeResHistory = false;
-  let currentQuery = "", booksCache = [], editingId = null;
+  let currentQuery = "", booksCache = [], editingId = null, currentTag = "", tagPrefillOk = false;
 
   // ===== 基础请求封装 =====
   async function api(method, path, body) {
@@ -338,7 +363,7 @@
   // ===== 数据加载 =====
   async function refresh() {
     try {
-      await Promise.all([loadStats(), loadBooks(), loadMyBorrows(),
+      await Promise.all([loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
                           loadMyReservations(), loadRanks()]);
     } catch (e) { toast(e.message, true); }
   }
@@ -355,6 +380,7 @@
   async function loadBooks() {
     let path = "/api/books?page=" + page + "&size=" + pageSize;
     if (currentQuery) path += "&q=" + encodeURIComponent(currentQuery);
+    if (currentTag) path += "&tag=" + encodeURIComponent(currentTag);
     const d = await api("GET", path);
     booksCache = d.books;
     const rows = $("book-rows");
@@ -393,7 +419,26 @@
     });
     $("page-info").textContent = "第 " + page + " 页";
     $("btn-prev").disabled = page <= 1;
-    $("btn-next").disabled = d.books.length < pageSize;
+    $("btn-next").disabled = d.books.length < pageSize || !!currentTag;
+  }
+
+  // ===== 标签云 =====
+  async function loadTags() {
+    try {
+      const d = await api("GET", "/api/tags");
+      const chips = $("tag-chips");
+      chips.innerHTML = "";
+      const tags = d.tags || [];
+      $("tag-cloud").style.display = tags.length ? "flex" : "none";
+      tags.forEach((t) => {
+        const span = document.createElement("span");
+        span.className = "tag-chip" + (t.name === currentTag ? " active" : "");
+        span.dataset.tag = t.name;
+        span.innerHTML = esc(t.name) + '<span class="c">' + t.count + "</span>";
+        chips.appendChild(span);
+      });
+      $("btn-clear-tag").style.display = currentTag ? "" : "none";
+    } catch (e) { /* 标签云为可选增强，失败不影响主功能 */ }
   }
 
   // ===== 借阅 / 归还 =====
@@ -545,15 +590,22 @@
   }
 
   // ===== 管理员：新增 / 编辑 / 删除 =====
-  function openBookModal(bookId) {
+  async function openBookModal(bookId) {
     editingId = bookId || null;
+    tagPrefillOk = false;
     $("modal-err").textContent = "";
+    $("f-tags").value = "";
     if (bookId) {
       const b = booksCache.find(x => x.id === bookId);
       $("modal-title").textContent = "编辑图书 #" + bookId;
       $("f-title").value = b ? b.title : "";
       $("f-author").value = b ? b.author : "";
       $("f-category").value = b ? b.category : "";
+      try {
+        const detail = await api("GET", "/api/books/" + bookId);
+        $("f-tags").value = (detail.tags || []).join("、");
+        tagPrefillOk = true;
+      } catch (e) { /* 预填失败则不覆盖标签 */ }
     } else {
       $("modal-title").textContent = "新增图书";
       $("f-title").value = ""; $("f-author").value = ""; $("f-category").value = "";
@@ -574,13 +626,20 @@
     }
     $("modal-err").textContent = "";
     const payload = { title, author, category };
+    const tagsVal = $("f-tags").value.trim();
     try {
+      let bookId = editingId;
       if (editingId) {
         await api("PUT", "/api/books/" + editingId, payload);
         toast("已保存修改");
       } else {
-        await api("POST", "/api/books", payload);
+        const created = await api("POST", "/api/books", payload);
+        bookId = created.id;
         toast("新增成功");
+      }
+      // 标签：新增书有值才设；编辑书仅当预填成功才覆盖（含清空）
+      if (bookId && (editingId ? tagPrefillOk : tagsVal)) {
+        await api("POST", "/api/books/" + bookId + "/tags", { tags: tagsVal });
       }
       closeModal();
       await refresh();
@@ -604,7 +663,14 @@
   $("btn-logout").onclick = logout;
   $("btn-search").onclick = () => { currentQuery = $("search-input").value.trim(); page = 1; loadBooks(); };
   $("search-input").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(); };
-  $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; page = 1; loadBooks(); };
+  $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTag = ""; page = 1; loadBooks(); loadTags(); };
+  $("btn-clear-tag").onclick = () => { currentTag = ""; loadBooks(); loadTags(); };
+  $("tag-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".tag-chip");
+    if (!chip) return;
+    currentTag = (chip.dataset.tag === currentTag) ? "" : chip.dataset.tag;
+    loadBooks(); loadTags();
+  });
   $("btn-prev").onclick = () => { page--; loadBooks(); };
   $("btn-next").onclick = () => { page++; loadBooks(); };
   $("btn-add-book").onclick = () => openBookModal(null);

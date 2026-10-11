@@ -90,7 +90,7 @@ def all_tags():
     for tags in tag_repo.tags_map().values():
         for t in tags:
             counts[t] = counts.get(t, 0) + 1
-    return [(name, counts.get(name, 0)) for name, _ in tag_repo.find_all_tags()]
+    return [(name, counts.get(name, 0)) for _, name in tag_repo.find_all_tags()]
 
 
 def filter_books(tag_names, match_all=False):
