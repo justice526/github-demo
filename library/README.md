@@ -242,7 +242,7 @@ python web.py 9000     # 指定端口
 | GET | `/health` | 健康检查 |
 | POST | `/api/login` | 登录，返回 token 与 `is_admin` |
 | POST | `/api/register` | 注册 |
-| GET | `/api/books` | 图书列表（`?q=关键词&category=分类&tag=标签&page=&size=`，附均分/人数） |
+| GET | `/api/books` | 图书列表（`?q=关键词&category=分类&tag=a&tag=b&match=any\|all&page=&size=`，附均分/人数） |
 | GET | `/api/books/<id>` | 图书详情（含评分与标签） |
 | POST / PUT / DELETE | `/api/books[/<id>]` | 增改删（管理员，需 token） |
 | GET | `/api/tags` | 全部标签及每标签被多少本书使用（供标签云浏览） |

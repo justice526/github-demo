@@ -141,6 +141,8 @@
   .tag-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .tag-chip .c { font-size: 11px; opacity: .7; }
   .tag-chip.active .c { opacity: .85; }
+  .tc-sep { font-size: 12px; color: var(--muted); margin-left: 6px; }
+  .tc-mode.active { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -194,6 +196,9 @@
     <div class="tag-cloud" id="tag-cloud" style="display:none">
       <span class="tc-label">标签：</span>
       <span id="tag-chips"></span>
+      <span class="tc-sep">匹配：</span>
+      <button class="small tc-mode active" data-mode="any">任一</button>
+      <button class="small tc-mode" data-mode="all">全部</button>
       <button class="small" id="btn-clear-tag" style="display:none">清除标签筛选</button>
     </div>
 
@@ -304,7 +309,7 @@
   const $ = (id) => document.getElementById(id);
   let token = null, currentUser = null, isAdmin = false, page = 1, pageSize = 10;
   let myReserveBookIds = new Set(), includeResHistory = false;
-  let currentQuery = "", booksCache = [], editingId = null, currentTag = "", tagPrefillOk = false;
+  let currentQuery = "", booksCache = [], editingId = null, currentTags = [], tagMatch = "any", tagPrefillOk = false;
 
   // ===== 基础请求封装 =====
   async function api(method, path, body) {
@@ -380,7 +385,10 @@
   async function loadBooks() {
     let path = "/api/books?page=" + page + "&size=" + pageSize;
     if (currentQuery) path += "&q=" + encodeURIComponent(currentQuery);
-    if (currentTag) path += "&tag=" + encodeURIComponent(currentTag);
+    if (currentTags.length) {
+      currentTags.forEach((t) => { path += "&tag=" + encodeURIComponent(t); });
+      path += "&match=" + tagMatch;
+    }
     const d = await api("GET", path);
     booksCache = d.books;
     const rows = $("book-rows");
@@ -419,7 +427,7 @@
     });
     $("page-info").textContent = "第 " + page + " 页";
     $("btn-prev").disabled = page <= 1;
-    $("btn-next").disabled = d.books.length < pageSize || !!currentTag;
+    $("btn-next").disabled = d.books.length < pageSize || currentTags.length > 0;
   }
 
   // ===== 标签云 =====
@@ -432,12 +440,12 @@
       $("tag-cloud").style.display = tags.length ? "flex" : "none";
       tags.forEach((t) => {
         const span = document.createElement("span");
-        span.className = "tag-chip" + (t.name === currentTag ? " active" : "");
+        span.className = "tag-chip" + (currentTags.includes(t.name) ? " active" : "");
         span.dataset.tag = t.name;
         span.innerHTML = esc(t.name) + '<span class="c">' + t.count + "</span>";
         chips.appendChild(span);
       });
-      $("btn-clear-tag").style.display = currentTag ? "" : "none";
+      $("btn-clear-tag").style.display = currentTags.length ? "" : "none";
     } catch (e) { /* 标签云为可选增强，失败不影响主功能 */ }
   }
 
@@ -663,13 +671,23 @@
   $("btn-logout").onclick = logout;
   $("btn-search").onclick = () => { currentQuery = $("search-input").value.trim(); page = 1; loadBooks(); };
   $("search-input").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(); };
-  $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTag = ""; page = 1; loadBooks(); loadTags(); };
-  $("btn-clear-tag").onclick = () => { currentTag = ""; loadBooks(); loadTags(); };
+  $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTags = []; page = 1; loadBooks(); loadTags(); };
+  $("btn-clear-tag").onclick = () => { currentTags = []; loadBooks(); loadTags(); };
   $("tag-chips").addEventListener("click", (e) => {
     const chip = e.target.closest(".tag-chip");
     if (!chip) return;
-    currentTag = (chip.dataset.tag === currentTag) ? "" : chip.dataset.tag;
+    const name = chip.dataset.tag;
+    const i = currentTags.indexOf(name);
+    if (i >= 0) currentTags.splice(i, 1); else currentTags.push(name);
     loadBooks(); loadTags();
+  });
+  document.querySelectorAll(".tc-mode").forEach((b) => {
+    b.onclick = () => {
+      tagMatch = b.dataset.mode;
+      document.querySelectorAll(".tc-mode").forEach((x) =>
+        x.classList.toggle("active", x.dataset.mode === tagMatch));
+      if (currentTags.length) loadBooks();
+    };
   });
   $("btn-prev").onclick = () => { page--; loadBooks(); };
   $("btn-next").onclick = () => { page++; loadBooks(); };

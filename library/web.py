@@ -25,7 +25,7 @@
     GET    /health                 健康检查
     POST   /api/login              登录，返回 token
     POST   /api/register           注册
-    GET    /api/books              图书列表（?page=&size=&q=&category=&tag=）
+    GET    /api/books              图书列表（?page=&size=&q=&category=&tag=a&tag=b&match=any|all）
     GET    /api/books/<id>         图书详情
     POST   /api/books              新增图书（管理员）
     PUT    /api/books/<id>         修改图书
@@ -272,11 +272,16 @@ def list_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
     q = (qs.get("q") or [""])[0]
     category = (qs.get("category") or [""])[0]
-    tag = (qs.get("tag") or [""])[0]
+    # 多标签：支持重复 ?tag=a&tag=b，或 ?tags=a,b 逗号形式
+    tags = qs.get("tag") or []
+    if not tags and qs.get("tags"):
+        tags = qs.get("tags")[0].split(",")
+    tags = [t.strip() for t in tags if t.strip()]
+    match = (qs.get("match") or ["any"])[0].lower()
     page = int((qs.get("page") or ["1"])[0])
     size = int((qs.get("size") or ["20"])[0])
-    if tag:
-        books = tag_service.filter_books([tag])
+    if tags:
+        books = tag_service.filter_books(tags, match_all=(match == "all"))
     elif q:
         books = book_service.search(q)
     elif category:
