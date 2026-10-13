@@ -51,45 +51,58 @@
 import json
 import os
 import re
-import secrets
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+from core import jwt
 from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
-                         ValidationError, BusinessRuleError)
+                         ValidationError, BusinessRuleError, RateLimitError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection
-from repository import book_repo, borrow_repo, tag_repo
+from repository import book_repo, borrow_repo, tag_repo, refresh_token_repo
 from service import (book_service, user_service, borrow_service,
                      rating_service, reservation_service, tag_service)
 
-# 标签功能依赖 tag / book_tag 两张表。在模块导入时幂等建表，
-# 保证无论通过 run() 还是直接 ThreadingHTTPServer 启动，表都存在。
+# 标签与刷新令牌表：导入时幂等建表，保证任何启动路径表都存在。
 tag_repo.init_table()
+refresh_token_repo.init_table()
 close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
-# ===== 内存 token 表（单机演示用）=====
-# token -> user_id。生产环境应改为 JWT（短时效访问令牌 + 服务端刷新令牌）。
-_TOKENS = {}
-_TOKEN_LOCK = __import__("threading").Lock()
+# ===== 生产加固配置（来自环境变量，缺省为演示值；生产务必设置 JWT_SECRET）=====
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-only-insecure-secret-change-me")
+ACCESS_TTL = int(os.environ.get("ACCESS_TTL", "1800"))       # 访问令牌寿命（秒）
+REFRESH_TTL = int(os.environ.get("REFRESH_TTL", "604800"))   # 刷新令牌寿命（秒，默认 7 天）
+RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "600"))        # 单 IP 每窗口允许请求数
+RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "60"))       # 限流窗口（秒）
+# CORS 白名单（逗号分隔的源）；为空表示仅同源，不暴露跨域头（禁用通配符）
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGIN", "").split(",") if o.strip()]
+
+# 限流计数（按客户端 IP 的固定窗口），进程内存态，演示够用
+_RATE_LOCK = threading.Lock()
+_RATE_BUCKETS = {}  # ip -> [窗口起点, 计数]
 
 
-def _issue_token(user_id):
-    token = secrets.token_urlsafe(24)
-    with _TOKEN_LOCK:
-        _TOKENS[token] = user_id
-    return token
+def _issue_tokens(uid):
+    """签发 (访问令牌 JWT, 刷新令牌)；刷新令牌服务端存储，可吊销/轮换"""
+    access = jwt.encode({"sub": str(uid)}, JWT_SECRET, ttl=ACCESS_TTL)
+    refresh = refresh_token_repo.create(uid, REFRESH_TTL)
+    return access, refresh
 
 
 def _resolve_token(handler):
-    """从请求头解析 token，返回 user_id；无 token 返回 None"""
+    """从 Bearer 头解出 user_id；失效/非法返回 None"""
     auth = handler.headers.get("Authorization", "")
     m = re.match(r"^Bearer\s+(\S+)$", auth)
     if not m:
         return None
-    with _TOKEN_LOCK:
-        return _TOKENS.get(m.group(1))
+    try:
+        payload = jwt.decode(m.group(1), JWT_SECRET)
+        return int(payload.get("sub"))
+    except (ValueError, TypeError):
+        return None
 
 
 def _require_user(handler):
@@ -106,6 +119,19 @@ def _require_admin(handler):
     if not user_service.is_admin(uid):
         raise PermissionError_("该操作仅管理员可执行")
     return uid
+
+
+def _rate_allowed(handler):
+    """固定窗口限流：未超限返回 True。兜底放行，避免配置异常阻断服务。"""
+    client = handler.client_address[0]
+    now = time.time()
+    with _RATE_LOCK:
+        bucket = _RATE_BUCKETS.get(client)
+        if bucket is None or now - bucket[0] >= RATE_WINDOW:
+            _RATE_BUCKETS[client] = [now, 1]
+            return True
+        bucket[1] += 1
+        return bucket[1] <= RATE_LIMIT
 
 
 def _read_json(handler):
@@ -128,13 +154,43 @@ def _read_json(handler):
     return data
 
 
+# 统一附加的安全响应头
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy":
+        "default-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+}
+
+
+def _cors_origin(handler):
+    """按白名单返回允许的 Origin；未配置则返回 None（仅同源）"""
+    if not _CORS_ORIGINS:
+        return None
+    origin = handler.headers.get("Origin")
+    return origin if origin in _CORS_ORIGINS else _CORS_ORIGINS[0]
+
+
+def _emit_common_headers(handler):
+    """附加 CORS（若配置）与安全头，供所有响应复用"""
+    origin = _cors_origin(handler)
+    if origin:
+        handler.send_header("Access-Control-Allow-Origin", origin)
+        handler.send_header("Access-Control-Allow-Credentials", "true")
+        handler.send_header("Vary", "Origin")
+    for k, v in _SECURITY_HEADERS.items():
+        handler.send_header(k, v)
+
+
 def _json_response(handler, status, payload):
     """输出 JSON 响应"""
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Access-Control-Allow-Origin", "*")
+    _emit_common_headers(handler)
     handler.end_headers()
     handler.wfile.write(body)
 
@@ -170,16 +226,19 @@ class ApiHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         try:
-            # 先处理 CORS 预检
+            # CORS 预检
             if method == "OPTIONS":
                 self.send_response(204)
-                self.send_header("Access-Control-Allow-Origin", "*")
+                _emit_common_headers(self)
                 self.send_header("Access-Control-Allow-Methods",
                                  "GET, POST, PUT, DELETE, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers",
                                  "Content-Type, Authorization")
                 self.end_headers()
                 return
+            # 限流（固定窗口，按客户端 IP）
+            if not _rate_allowed(self):
+                raise RateLimitError()
             result = self._dispatch(method, path)
             if result is None:
                 raise NotFoundError(f"接口不存在：{method} {path}")
@@ -209,6 +268,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        _emit_common_headers(self)
         self.end_headers()
         self.wfile.write(body)
 
@@ -251,10 +311,34 @@ def health(handler):
 def login(handler):
     data = _read_json(handler)
     uid = user_service.login(data.get("username", ""), data.get("password", ""))
-    return _ok(handler, {"token": _issue_token(uid),
+    access, refresh = _issue_tokens(uid)
+    return _ok(handler, {"token": access, "refresh_token": refresh,
                          "user_id": uid,
                          "username": data.get("username"),
                          "is_admin": bool(user_service.is_admin(uid))})
+
+
+@_register("POST", r"/api/refresh")
+def refresh(handler):
+    """用刷新令牌换取新的访问令牌，并轮换刷新令牌（吊销旧令牌）"""
+    data = _read_json(handler)
+    rt = data.get("refresh_token", "")
+    uid = refresh_token_repo.validate(rt)
+    if uid is None:
+        raise AuthError("刷新令牌无效或已过期")
+    refresh_token_repo.revoke(rt)
+    access, new_refresh = _issue_tokens(uid)
+    return _ok(handler, {"token": access, "refresh_token": new_refresh})
+
+
+@_register("POST", r"/api/logout")
+def logout(handler):
+    """吊销刷新令牌（最佳努力，失败不报错）"""
+    data = _read_json(handler)
+    rt = data.get("refresh_token", "")
+    if rt:
+        refresh_token_repo.revoke(rt)
+    return _ok(handler, {"logged_out": True})
 
 
 @_register("POST", r"/api/register")

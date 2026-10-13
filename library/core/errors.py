@@ -9,7 +9,7 @@
 __all__ = [
     "AppError", "ValidationError", "NotFoundError", "PermissionError_",
     "ConflictError", "BusinessRuleError", "AuthError", "DatabaseError",
-    "to_user_message",
+    "RateLimitError", "to_user_message",
 ]
 
 
@@ -91,6 +91,13 @@ class DatabaseError(AppError):
     default_message = "数据库操作失败"
 
 
+class RateLimitError(AppError):
+    """请求频率超限：限流器触发，应返回 429"""
+
+    default_code = "rate_limited"
+    default_message = "请求过于频繁，请稍后再试"
+
+
 # 异常类型 → 建议的 HTTP 状态码，供将来的 Web 层直接复用
 HTTP_STATUS = {
     ValidationError: 400,
@@ -100,6 +107,7 @@ HTTP_STATUS = {
     ConflictError: 409,
     BusinessRuleError: 422,
     DatabaseError: 500,
+    RateLimitError: 429,
 }
 
 

@@ -307,21 +307,50 @@
 
 <script>
   const $ = (id) => document.getElementById(id);
-  let token = null, currentUser = null, isAdmin = false, page = 1, pageSize = 10;
+  let token = null, refreshToken = null, currentUser = null, isAdmin = false,
+      page = 1, pageSize = 10, refreshing = false;
   let myReserveBookIds = new Set(), includeResHistory = false;
   let currentQuery = "", booksCache = [], editingId = null, currentTags = [], tagMatch = "any", tagPrefillOk = false;
 
-  // ===== 基础请求封装 =====
-  async function api(method, path, body) {
+  // ===== 基础请求封装（含访问令牌过期自动续期）=====
+  async function api(method, path, body, _retry = true) {
     const opts = { method, headers: { "Content-Type": "application/json" } };
     if (token) opts.headers["Authorization"] = "Bearer " + token;
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(path, opts);
-    const data = await res.json();
-    if (!res.ok || data.ok === false) {
-      throw new Error(data.message || ("请求失败（" + res.status + "）"));
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok !== false) return data.data;
+    // 访问令牌失效（401）时尝试用刷新令牌续期，仅重试一次，避免雪崩
+    if (res.status === 401 && refreshToken && _retry && !refreshing) {
+      const ok = await doRefresh();
+      if (ok) return api(method, path, body, false);
     }
-    return data.data;
+    if (res.status === 401) logout();  // 续期失败：强制登出
+    throw new Error(data.message || ("请求失败（" + res.status + "）"));
+  }
+
+  // 用刷新令牌换取新的访问令牌（并轮换刷新令牌），成功返回 true
+  async function doRefresh() {
+    if (!refreshToken) return false;
+    refreshing = true;
+    try {
+      const res = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        token = data.data.token;
+        refreshToken = data.data.refresh_token;  // 服务端已吊销旧刷新令牌
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    } finally {
+      refreshing = false;
+    }
   }
 
   function toast(msg, isErr) {
@@ -344,7 +373,8 @@
     $("login-err").textContent = "";
     try {
       const d = await api("POST", "/api/login", { username: u, password: p });
-      token = d.token; currentUser = d.username; isAdmin = !!d.is_admin;
+      token = d.token; refreshToken = d.refresh_token;
+      currentUser = d.username; isAdmin = !!d.is_admin;
       $("login-view").style.display = "none";
       $("main-view").style.display = "block";
       $("btn-logout").style.display = "";
@@ -356,8 +386,19 @@
       $("login-err").textContent = e.message;
     }
   }
-  function logout() {
-    token = null; currentUser = null; isAdmin = false; page = 1;
+  async function logout() {
+    // 最佳努力吊销服务端刷新令牌（失败不影响本地登出）
+    if (refreshToken) {
+      try {
+        await fetch("/api/logout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      } catch (e) { /* 忽略网络错误 */ }
+    }
+    token = null; refreshToken = null; currentUser = null;
+    isAdmin = false; page = 1;
     $("admin-bar").style.display = "none";
     $("main-view").style.display = "none";
     $("login-view").style.display = "block";

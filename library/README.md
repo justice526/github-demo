@@ -240,7 +240,9 @@ python web.py 9000     # 指定端口
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查 |
-| POST | `/api/login` | 登录，返回 token 与 `is_admin` |
+| POST | `/api/login` | 登录，返回 `token`(JWT 访问令牌) 与 `refresh_token`(刷新令牌) 及 `is_admin` |
+| POST | `/api/refresh` | 用 `refresh_token` 换取新令牌，并轮换吊销旧刷新令牌 |
+| POST | `/api/logout` | 吊销 `refresh_token`（最佳努力） |
 | POST | `/api/register` | 注册 |
 | GET | `/api/books` | 图书列表（`?q=关键词&category=分类&tag=a&tag=b&match=any\|all&page=&size=`，附均分/人数） |
 | GET | `/api/books/<id>` | 图书详情（含评分与标签） |
@@ -266,5 +268,40 @@ python web.py 9000     # 指定端口
 （400 校验 / 401 未登录 / 403 无权限 / 404 不存在 / 422 业务规则 / 500 服务器错误），
 响应统一为 `{ok, code, message}`，绝不向客户端泄露堆栈。
 
-> 认证为单机演示用的内存 token；生产环境应换 JWT 短时效访问令牌 +
-> 服务端刷新令牌，token 不要存 localStorage，也不要放 URL 查询参数。
+## 认证与安全（生产加固）
+
+系统已实现面向生产的认证与防护，**零第三方依赖**（纯标准库实现）：
+
+- **JWT 短时效访问令牌**：`core/jwt.py` 用 `hmac` + `sha256` 自实现 HS256，
+  签名用恒定时间比较（防时序攻击），令牌带 `iat`/`exp` 自动过期。
+- **服务端刷新令牌**：`repository/refresh_token_repo.py` 把刷新令牌存库，
+  支持校验、吊销单条（`revoke`）、吊销全部（`revoke_all`，用于改密/强制下线），
+  以及**轮换**（refresh 时吊销旧令牌、签发新令牌）。
+- **限流**：按客户端 IP 固定窗口限流，超限返回 `429`（映射 `RateLimitError`），
+  配置 `RATE_LIMIT` / `RATE_WINDOW`。
+- **CORS**：从通配符 `*` 改为按 `CORS_ORIGIN` 白名单显式回显 `Origin`，
+  附带 `Access-Control-Allow-Credentials: true` 与 `Vary: Origin`（禁用通配符+凭据的组合）。
+- **安全响应头**：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、
+  `Referrer-Policy: no-referrer`、`Content-Security-Policy`（默认 `self`）。
+
+### 关键环境变量（生产务必设置）
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `JWT_SECRET` | `dev-only-insecure-secret-change-me` | **生产必须设置**，否则访问令牌可被伪造 |
+| `ACCESS_TTL` | `1800` | 访问令牌寿命（秒） |
+| `REFRESH_TTL` | `604800` | 刷新令牌寿命（秒，默认 7 天） |
+| `RATE_LIMIT` | `600` | 单 IP 每窗口允许请求数 |
+| `RATE_WINDOW` | `60` | 限流窗口（秒） |
+| `CORS_ORIGIN` | 空 | 逗号分隔的允许源；为空则仅同源，不暴露跨域头 |
+
+### 客户端约定
+
+- 登录后把 `token` 作为 `Authorization: Bearer <token>` 附带；
+  `refresh_token` 仅用于 `/api/refresh`，**不要放进 URL 或 localStorage**，建议存内存。
+- 访问令牌过期/失效时，先用 `refresh_token` 调 `/api/refresh` 续期（拿到新 `token`
+  + 新 `refresh_token`），失败则跳登录。前端 `static/index.html` 已内置该自动续期逻辑。
+- 退出时调 `/api/logout` 吊销刷新令牌，避免令牌被长期盗用。
+
+> ⚠️ 演示默认 `JWT_SECRET` 为明文硬编码占位值，仅用于本地开发；任何生产部署都
+> 必须通过环境变量注入强随机密钥，并全链路启用 HTTPS。
