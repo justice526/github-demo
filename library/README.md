@@ -244,6 +244,14 @@ python web.py 9000     # 指定端口
 | POST | `/api/refresh` | 用 `refresh_token` 换取新令牌，并轮换吊销旧刷新令牌 |
 | POST | `/api/logout` | 吊销 `refresh_token`（最佳努力） |
 | POST | `/api/register` | 注册 |
+| POST | `/api/me/password` | 修改自己的密码 `{old_password, new_password}`（需登录） |
+| GET | `/api/security-question` | 取密保问题 `?username=`（找回密码前置，公开） |
+| POST | `/api/reset-password` | 通过密保重置密码 `{username, answer, new_password}`（公开） |
+| GET | `/api/me/penalty` | 我的未结清罚款总额（需登录） |
+| GET | `/api/users` | 用户列表（管理员） |
+| POST | `/api/users/<id>/recharge` | 给用户充值 `{amount}`（管理员） |
+| GET | `/api/admin/borrows` | 全部借阅记录（管理员） |
+| GET | `/api/admin/overdue` | 逾期未还报表（管理员） |
 | GET | `/api/books` | 图书列表（`?q=关键词&category=分类&tag=a&tag=b&match=any\|all&page=&size=`，附均分/人数） |
 | GET | `/api/books/<id>` | 图书详情（含评分与标签） |
 | POST / PUT / DELETE | `/api/books[/<id>]` | 增改删（管理员，需 token） |

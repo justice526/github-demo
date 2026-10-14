@@ -23,8 +23,18 @@
 接口一览（响应均为 JSON）::
 
     GET    /health                 健康检查
-    POST   /api/login              登录，返回 token
+    POST   /api/login              登录，返回 token + refresh_token
+    POST   /api/refresh            用 refresh_token 换新令牌（轮换吊销旧令牌）
+    POST   /api/logout             吊销 refresh_token
     POST   /api/register           注册
+    POST   /api/me/password        修改自己的密码 {old_password, new_password}
+    GET    /api/security-question  取密保问题 ?username=（找回密码前置）
+    POST   /api/reset-password     通过密保重置密码 {username, answer, new_password}
+    GET    /api/me/penalty         我的未结清罚款
+    GET    /api/users              用户列表（管理员）
+    POST   /api/users/<id>/recharge 给用户充值 {amount}（管理员）
+    GET    /api/admin/borrows      全部借阅记录（管理员）
+    GET    /api/admin/overdue      逾期未还报表（管理员）
     GET    /api/books              图书列表（?page=&size=&q=&category=&tag=a&tag=b&match=any|all）
     GET    /api/books/<id>         图书详情
     POST   /api/books              新增图书（管理员）
@@ -347,6 +357,77 @@ def register(handler):
     uid = user_service.register(data.get("username", ""), data.get("password", ""),
                                 data.get("security_q", ""), data.get("security_a", ""))
     return _ok(handler, {"user_id": uid}, status=201)
+
+
+# ---- 账户与监管（用户自助 + 管理员）----
+
+@_register("POST", r"/api/me/password")
+def change_password(handler):
+    """修改自己的密码（需原密码）"""
+    uid = _require_user(handler)
+    data = _read_json(handler)
+    ok = user_service.modify_password(
+        uid, data.get("old_password", ""), data.get("new_password", ""))
+    return _ok(handler, {"changed": ok})
+
+
+@_register("GET", r"/api/security-question")
+def security_question(handler):
+    """取密保问题（找回密码前置，公开接口）"""
+    qs = parse_qs(urlparse(handler.path).query)
+    username = (qs.get("username") or [""])[0].strip()
+    q = user_service.get_security_question(username)
+    if q is None:
+        raise NotFoundError("用户不存在")
+    return _ok(handler, {"username": username, "question": q})
+
+
+@_register("POST", r"/api/reset-password")
+def reset_password(handler):
+    """通过密保答案重置密码（公开接口）"""
+    data = _read_json(handler)
+    ok = user_service.reset_password_by_qa(
+        data.get("username", ""), data.get("answer", ""), data.get("new_password", ""))
+    return _ok(handler, {"reset": ok})
+
+
+@_register("GET", r"/api/me/penalty")
+def my_penalty(handler):
+    """我的未结清罚款总额"""
+    uid = _require_user(handler)
+    return _ok(handler, {"unpaid_penalty": borrow_service.my_total_penalty(uid)})
+
+
+@_register("GET", r"/api/users")
+def list_users(handler):
+    """全部用户（管理员）"""
+    _require_admin(handler)
+    users = [{"id": u[0], "username": u[1], "balance": u[2],
+              "is_admin": bool(u[3])} for u in user_service.list_users()]
+    return _ok(handler, {"users": users})
+
+
+@_register("POST", r"/api/users/(?P<uid>\d+)/recharge")
+def recharge_user(handler, uid):
+    """给某用户充值余额（管理员）"""
+    _require_admin(handler)
+    data = _read_json(handler)
+    user_service.recharge(int(uid), data.get("amount"))
+    return _ok(handler, {"balance": user_service.get_balance(int(uid))})
+
+
+@_register("GET", r"/api/admin/borrows")
+def admin_borrows(handler):
+    """全部借阅记录（管理员监管）"""
+    _require_admin(handler)
+    return _ok(handler, {"borrows": borrow_service.all_borrows()})
+
+
+@_register("GET", r"/api/admin/overdue")
+def admin_overdue(handler):
+    """全部逾期未还记录（管理员报表）"""
+    _require_admin(handler)
+    return _ok(handler, {"overdue": borrow_service.all_overdue()})
 
 
 # ---- 图书 ----

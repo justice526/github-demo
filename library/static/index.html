@@ -41,6 +41,8 @@
   button.danger { background: var(--danger); color: #fff; }
   button.small { padding: 4px 10px; font-size: 12px; }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  .link { color: var(--accent); font-size: 13px; cursor: pointer; background: none; padding: 0; }
+  .link:hover { text-decoration: underline; }
 
   .wrap { max-width: 1080px; margin: 0 auto; padding: 20px 16px; }
 
@@ -150,6 +152,7 @@
     <h1>📚 图书管理系统</h1>
     <div class="spacer"></div>
     <span class="who" id="who"></span>
+    <button class="small" id="btn-pwd" style="display:none">修改密码</button>
     <button class="small" id="btn-logout" style="display:none">退出</button>
   </div>
 
@@ -168,6 +171,30 @@
       </div>
       <button class="primary" id="btn-login" style="width:100%">登 录</button>
       <div class="err" id="login-err"></div>
+      <div style="margin-top:12px; text-align:center">
+        <span class="link" id="btn-forgot">忘记密码？</span>
+      </div>
+    </div>
+
+    <!-- 找回密码 -->
+    <div class="login-card" id="forgot-view" style="display:none">
+      <h2>找回密码</h2>
+      <div class="sub">通过密保问题重置密码</div>
+      <div class="field">
+        <label>用户名</label>
+        <input id="fg-user" placeholder="用户名">
+      </div>
+      <button class="primary" id="btn-fg-q" style="width:100%">下一步</button>
+      <div class="field" id="fg-q-box" style="display:none; margin-top:14px">
+        <label id="fg-question" style="color:var(--text)"></label>
+        <input id="fg-answer" placeholder="密保答案">
+        <input id="fg-newpwd" type="password" placeholder="新密码（≥6 位）" style="margin-top:10px">
+      </div>
+      <button class="primary" id="btn-fg-reset" style="width:100%; margin-top:10px; display:none">重置密码</button>
+      <div class="err" id="fg-err"></div>
+      <div style="margin-top:12px; text-align:center">
+        <span class="link" id="btn-fg-back">返回登录</span>
+      </div>
     </div>
   </div>
 
@@ -178,6 +205,7 @@
       <div class="card"><div class="label">在架可借</div><div class="num" id="s-avail">-</div></div>
       <div class="card"><div class="label">已借出</div><div class="num" id="s-borrowed">-</div></div>
       <div class="card"><div class="label">我未归还</div><div class="num" id="s-mine">-</div></div>
+      <div class="card"><div class="label">我的未缴罚款</div><div class="num" id="s-penalty">-</div></div>
     </div>
 
     <!-- 管理员工具栏（仅管理员可见） -->
@@ -251,6 +279,67 @@
       <div class="table-wrap">
         <div class="rank-head">⭐ 高分榜</div>
         <ol class="rank-list" id="rank-top"></ol>
+      </div>
+    </div>
+
+    <!-- 管理员面板：用户管理 + 逾期报表 -->
+    <div id="admin-panel" style="display:none">
+      <h3 style="margin:22px 0 10px; font-size:15px">用户管理</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>用户名</th><th>余额</th><th>角色</th><th>操作</th></tr>
+          </thead>
+          <tbody id="user-rows"></tbody>
+        </table>
+        <div class="empty" id="user-empty" style="display:none">暂无用户</div>
+      </div>
+
+      <h3 style="margin:22px 0 10px; font-size:15px">逾期未还报表</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>用户</th><th>书名</th><th>应还时间</th><th>罚款</th></tr>
+          </thead>
+          <tbody id="overdue-rows"></tbody>
+        </table>
+        <div class="empty" id="overdue-empty" style="display:none">当前没有逾期未还的图书</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 充值 模态框 -->
+  <div class="modal-mask" id="recharge-mask" style="display:none">
+    <div class="modal">
+      <h3 id="recharge-title">给用户充值</h3>
+      <div class="field">
+        <label>充值金额（元）</label>
+        <input id="f-amount" type="number" min="0.01" step="0.01" placeholder="如：50">
+      </div>
+      <div class="err" id="recharge-err"></div>
+      <div class="actions">
+        <button id="btn-cancel-recharge">取消</button>
+        <button class="primary" id="btn-save-recharge">确认充值</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 修改密码 模态框 -->
+  <div class="modal-mask" id="pwd-mask" style="display:none">
+    <div class="modal">
+      <h3>修改密码</h3>
+      <div class="field">
+        <label>原密码</label>
+        <input id="pwd-old" type="password" placeholder="原密码">
+      </div>
+      <div class="field">
+        <label>新密码（≥6 位）</label>
+        <input id="pwd-new" type="password" placeholder="新密码">
+      </div>
+      <div class="err" id="pwd-err"></div>
+      <div class="actions">
+        <button id="btn-cancel-pwd">取消</button>
+        <button class="primary" id="btn-save-pwd">保存</button>
       </div>
     </div>
   </div>
@@ -378,8 +467,10 @@
       $("login-view").style.display = "none";
       $("main-view").style.display = "block";
       $("btn-logout").style.display = "";
+      $("btn-pwd").style.display = "";
       $("who").textContent = "当前用户：" + currentUser + (isAdmin ? "（管理员）" : "");
       $("admin-bar").style.display = isAdmin ? "flex" : "none";
+      $("admin-panel").style.display = isAdmin ? "block" : "none";
       $("login-pwd").value = "";
       await refresh();
     } catch (e) {
@@ -400,27 +491,33 @@
     token = null; refreshToken = null; currentUser = null;
     isAdmin = false; page = 1;
     $("admin-bar").style.display = "none";
+    $("admin-panel").style.display = "none";
     $("main-view").style.display = "none";
     $("login-view").style.display = "block";
     $("btn-logout").style.display = "none";
+    $("btn-pwd").style.display = "none";
     $("who").textContent = "";
   }
 
   // ===== 数据加载 =====
   async function refresh() {
     try {
-      await Promise.all([loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
-                          loadMyReservations(), loadRanks()]);
+      const tasks = [loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
+                     loadMyReservations(), loadRanks()];
+      if (isAdmin) tasks.push(loadAdmin());
+      await Promise.all(tasks);
     } catch (e) { toast(e.message, true); }
   }
 
   async function loadStats() {
     const dash = await api("GET", "/api/stats/dashboard");
     const mine = await api("GET", "/api/my/summary");
+    const pen = await api("GET", "/api/me/penalty");
     $("s-total").textContent = dash.total_book;
     $("s-avail").textContent = dash.available;
     $("s-borrowed").textContent = dash.borrowed;
     $("s-mine").textContent = mine.borrowed;
+    $("s-penalty").textContent = (pen.unpaid_penalty || 0) + " 元";
   }
 
   async function loadBooks() {
@@ -706,10 +803,129 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // ===== 修改密码 =====
+  function openPwdModal() {
+    $("pwd-old").value = ""; $("pwd-new").value = ""; $("pwd-err").textContent = "";
+    $("pwd-mask").style.display = "flex";
+  }
+  async function submitPwd() {
+    const oldp = $("pwd-old").value, newp = $("pwd-new").value;
+    if (!oldp || !newp) { $("pwd-err").textContent = "请填写原密码与新密码"; return; }
+    if (newp.length < 6) { $("pwd-err").textContent = "新密码至少 6 位"; return; }
+    $("pwd-err").textContent = "";
+    try {
+      await api("POST", "/api/me/password", { old_password: oldp, new_password: newp });
+      toast("密码已修改");
+      $("pwd-mask").style.display = "none";
+    } catch (e) { $("pwd-err").textContent = e.message; }
+  }
+
+  // ===== 找回密码（密保）=====
+  function showForgot() {
+    $("login-view").style.display = "none";
+    $("forgot-view").style.display = "block";
+    $("fg-q-box").style.display = "none"; $("btn-fg-reset").style.display = "none";
+    $("fg-err").textContent = "";
+  }
+  function backToLogin() {
+    $("forgot-view").style.display = "none";
+    $("login-view").style.display = "block";
+  }
+  async function fgLoadQuestion() {
+    const u = $("fg-user").value.trim();
+    if (!u) { $("fg-err").textContent = "请输入用户名"; return; }
+    $("fg-err").textContent = "";
+    try {
+      const d = await api("GET", "/api/security-question?username=" + encodeURIComponent(u));
+      $("fg-question").textContent = d.question || "（该用户未设置密保问题）";
+      $("fg-q-box").style.display = "block";
+      $("btn-fg-reset").style.display = d.question ? "block" : "none";
+    } catch (e) { $("fg-err").textContent = e.message; }
+  }
+  async function fgReset() {
+    const u = $("fg-user").value.trim();
+    const ans = $("fg-answer").value.trim();
+    const np = $("fg-newpwd").value;
+    if (!np || np.length < 6) { $("fg-err").textContent = "新密码至少 6 位"; return; }
+    $("fg-err").textContent = "";
+    try {
+      await api("POST", "/api/reset-password",
+                { username: u, answer: ans, new_password: np });
+      toast("密码已重置，请用新密码登录");
+      backToLogin();
+    } catch (e) { $("fg-err").textContent = e.message; }
+  }
+
+  // ===== 管理员：用户与逾期报表 =====
+  let rechargeUid = null;
+  async function loadAdmin() {
+    try {
+      const d = await api("GET", "/api/users");
+      const rows = $("user-rows");
+      rows.innerHTML = "";
+      $("user-empty").style.display = d.users.length ? "none" : "";
+      d.users.forEach((u) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + esc(u.username) + "</td>" +
+          "<td>" + (u.balance ?? 0) + " 元</td>" +
+          "<td>" + (u.is_admin ? "管理员" : "普通用户") + "</td>" +
+          '<td><button class="small" data-rc="' + u.id + '">充值</button></td>';
+        rows.appendChild(tr);
+      });
+    } catch (e) { /* 非管理员静默 */ }
+    try {
+      const d2 = await api("GET", "/api/admin/overdue");
+      const rows2 = $("overdue-rows");
+      rows2.innerHTML = "";
+      $("overdue-empty").style.display = d2.overdue.length ? "none" : "";
+      d2.overdue.forEach((o) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + esc(o.username || "—") + "</td>" +
+          "<td>" + esc(o.title || "—") + "</td>" +
+          "<td>" + esc((o.deadline || "").slice(0, 16)) + "</td>" +
+          "<td>" + (o.penalty || 0) + " 元</td>";
+        rows2.appendChild(tr);
+      });
+    } catch (e) { /* 非管理员静默 */ }
+  }
+  function openRecharge(uid) {
+    rechargeUid = uid;
+    $("f-amount").value = ""; $("recharge-err").textContent = "";
+    $("recharge-mask").style.display = "flex";
+  }
+  async function submitRecharge() {
+    const amt = parseFloat($("f-amount").value);
+    if (!rechargeUid || !(amt > 0)) { $("recharge-err").textContent = "请输入有效金额"; return; }
+    $("recharge-err").textContent = "";
+    try {
+      const d = await api("POST", "/api/users/" + rechargeUid + "/recharge", { amount: amt });
+      toast("充值成功，余额 " + d.balance + " 元");
+      $("recharge-mask").style.display = "none";
+      await loadAdmin();
+    } catch (e) { $("recharge-err").textContent = e.message; }
+  }
+
   // ===== 事件绑定 =====
   $("btn-login").onclick = login;
   $("login-pwd").onkeydown = (e) => { if (e.key === "Enter") login(); };
   $("btn-logout").onclick = logout;
+  $("btn-pwd").onclick = openPwdModal;
+  $("btn-cancel-pwd").onclick = () => { $("pwd-mask").style.display = "none"; };
+  $("btn-save-pwd").onclick = submitPwd;
+  $("pwd-mask").addEventListener("click", (e) => { if (e.target === $("pwd-mask")) $("pwd-mask").style.display = "none"; });
+  $("btn-forgot").onclick = showForgot;
+  $("btn-fg-back").onclick = backToLogin;
+  $("btn-fg-q").onclick = fgLoadQuestion;
+  $("btn-fg-reset").onclick = fgReset;
+  $("btn-cancel-recharge").onclick = () => { $("recharge-mask").style.display = "none"; };
+  $("btn-save-recharge").onclick = submitRecharge;
+  $("recharge-mask").addEventListener("click", (e) => { if (e.target === $("recharge-mask")) $("recharge-mask").style.display = "none"; });
+  $("user-rows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-rc]");
+    if (btn) openRecharge(parseInt(btn.dataset.rc));
+  });
   $("btn-search").onclick = () => { currentQuery = $("search-input").value.trim(); page = 1; loadBooks(); };
   $("search-input").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(); };
   $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTags = []; page = 1; loadBooks(); loadTags(); };

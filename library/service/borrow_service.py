@@ -257,6 +257,34 @@ def my_stats(user_id):
     }
 
 
+def all_borrows():
+    """全部借阅记录（管理员监管用），含 overdue 标记
+
+    仅做时间戳与「是否已归还」的呈现计算，不涉及业务规则。
+    """
+    now = _now()
+    out = []
+    for rid, username, title, borrow_time, deadline_str, return_time, penalty in borrow_repo.find_all():
+        overdue = False
+        if return_time is None and deadline_str:
+            try:
+                overdue = now > _parse(deadline_str)
+            except BusinessRuleError:
+                overdue = False
+        out.append({
+            "id": rid, "username": username, "title": title,
+            "borrow_time": borrow_time, "deadline": deadline_str,
+            "return_time": return_time, "penalty": round(float(penalty or 0), 2),
+            "overdue": overdue,
+        })
+    return out
+
+
+def all_overdue():
+    """全部逾期未还记录（管理员报表）"""
+    return [b for b in all_borrows() if b["overdue"]]
+
+
 # ==================== 导出 ====================
 
 def export_my_csv(user_id, save_path="borrow_record.csv"):
