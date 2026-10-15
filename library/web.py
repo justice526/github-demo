@@ -35,6 +35,11 @@
     POST   /api/users/<id>/recharge 给用户充值 {amount}（管理员）
     GET    /api/admin/borrows      全部借阅记录（管理员）
     GET    /api/admin/overdue      逾期未还报表（管理员）
+    GET    /api/my/due-soon        即将到期提醒（?days=，默认 3 天）
+    GET    /api/my/stats           我的借阅统计
+    GET    /api/books/<id>/history 某书借阅历史
+    GET    /api/export/my-borrows  导出我的借阅记录 CSV
+    GET    /api/export/all-borrows 导出全部借阅记录 CSV（管理员）
     GET    /api/books              图书列表（?page=&size=&q=&category=&tag=a&tag=b&match=any|all）
     GET    /api/books/<id>         图书详情
     POST   /api/books              新增图书（管理员）
@@ -209,6 +214,20 @@ def _ok(handler, data=None, status=200):
     _json_response(handler, status, {"ok": True, "data": data})
 
 
+def _csv_response(handler, filename, content):
+    """输出 CSV 文件下载响应（utf-8-sig，Excel 不乱码）"""
+    body = content.encode("utf-8")
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/csv; charset=utf-8")
+    handler.send_header(
+        "Content-Disposition",
+        "attachment; filename=\"%s\"" % filename.replace("\"", ""))
+    handler.send_header("Content-Length", str(len(body)))
+    _emit_common_headers(handler)
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def _fail(handler, exc):
     status = http_status_of(exc)
     payload = {"ok": False, "code": getattr(exc, "code", "error"),
@@ -223,13 +242,18 @@ class ApiHandler(BaseHTTPRequestHandler):
     ROUTES = []
 
     def _dispatch(self, method, path):
+        """返回 (是否匹配, 处理函数返回值)。
+
+        把「路由是否匹配」与「处理函数返回值」区分开：处理函数可自行
+        直接写出响应（如 CSV 下载）并返回 None，匹配成功不应被判为 404。
+        """
         for (m, pattern, func) in self.ROUTES:
             if m != method:
                 continue
             match = pattern.match(path)
             if match:
-                return func(self, **match.groupdict())
-        return None
+                return True, func(self, **match.groupdict())
+        return False, None
 
     def _route(self, method):
         """主分发：统一 try/except，异常转 JSON"""
@@ -249,8 +273,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             # 限流（固定窗口，按客户端 IP）
             if not _rate_allowed(self):
                 raise RateLimitError()
-            result = self._dispatch(method, path)
-            if result is None:
+            matched, _result = self._dispatch(method, path)
+            if not matched:
                 raise NotFoundError(f"接口不存在：{method} {path}")
         except AppError as e:
             _fail(self, e)
@@ -577,6 +601,43 @@ def my_current(handler):
 def my_summary(handler):
     uid = _require_user(handler)
     return _ok(handler, borrow_service.get_borrow_summary(uid))
+
+
+@_register("GET", r"/api/my/due-soon")
+def my_due_soon(handler):
+    """即将到期提醒（默认 3 天内，?days= 可调）"""
+    uid = _require_user(handler)
+    qs = parse_qs(urlparse(handler.path).query)
+    days = int((qs.get("days") or ["3"])[0])
+    return _ok(handler, {"items": borrow_service.due_soon_books(uid, days)})
+
+
+@_register("GET", r"/api/my/stats")
+def my_stats_ep(handler):
+    """我的借阅统计概览"""
+    uid = _require_user(handler)
+    return _ok(handler, borrow_service.my_stats(uid))
+
+
+@_register("GET", r"/api/books/(?P<bid>\d+)/history")
+def book_history_ep(handler, bid):
+    """某本书的借阅历史（需登录）"""
+    _require_user(handler)
+    return _ok(handler, {"history": borrow_service.book_history(int(bid))})
+
+
+@_register("GET", r"/api/export/my-borrows")
+def export_my_borrows(handler):
+    """导出我的借阅记录为 CSV（下载）"""
+    uid = _require_user(handler)
+    _csv_response(handler, "my_borrows.csv", borrow_service.csv_my_borrows(uid))
+
+
+@_register("GET", r"/api/export/all-borrows")
+def export_all_borrows(handler):
+    """导出全部借阅记录为 CSV（管理员，下载）"""
+    _require_admin(handler)
+    _csv_response(handler, "all_borrows.csv", borrow_service.csv_all_borrows())
 
 
 # ---- 评分 ----

@@ -218,6 +218,7 @@
       <input class="grow" id="search-input" placeholder="搜索书名 / 作者…">
       <button class="primary" id="btn-search">搜索</button>
       <button id="btn-reset">全部</button>
+      <button class="small" id="btn-export">导出我的借阅</button>
     </div>
 
     <!-- 标签云：点击按标签筛选 -->
@@ -270,6 +271,17 @@
       <div class="empty" id="res-empty" style="display:none">你还没有预约任何图书</div>
     </div>
 
+    <h3 style="margin:22px 0 10px; font-size:15px">即将到期</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>书名</th><th>应还时间</th><th>剩余天数</th></tr>
+        </thead>
+        <tbody id="due-rows"></tbody>
+      </table>
+      <div class="empty" id="due-empty" style="display:none">没有即将到期的图书</div>
+    </div>
+
     <h3 style="margin:22px 0 10px; font-size:15px">排行榜</h3>
     <div class="rank-grid">
       <div class="table-wrap">
@@ -284,6 +296,10 @@
 
     <!-- 管理员面板：用户管理 + 逾期报表 -->
     <div id="admin-panel" style="display:none">
+      <div class="admin-bar" style="display:flex">
+        <span class="badge">管理员</span>
+        <button class="primary small" id="btn-export-all">导出全部借阅 CSV</button>
+      </div>
       <h3 style="margin:22px 0 10px; font-size:15px">用户管理</h3>
       <div class="table-wrap">
         <table>
@@ -388,6 +404,25 @@
       <div class="actions">
         <button id="btn-cancel-rate">取消</button>
         <button class="primary" id="btn-submit-rate">提交评分</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 借阅历史 模态框 -->
+  <div class="modal-mask" id="history-mask" style="display:none">
+    <div class="modal">
+      <h3 id="history-title">借阅历史</h3>
+      <div class="table-wrap" style="margin-top:8px">
+        <table>
+          <thead>
+            <tr><th>借阅人</th><th>借出时间</th><th>应还时间</th><th>归还时间</th></tr>
+          </thead>
+          <tbody id="history-rows"></tbody>
+        </table>
+        <div class="empty" id="history-empty" style="display:none">暂无借阅记录</div>
+      </div>
+      <div class="actions">
+        <button id="btn-cancel-history">关闭</button>
       </div>
     </div>
   </div>
@@ -503,7 +538,7 @@
   async function refresh() {
     try {
       const tasks = [loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
-                     loadMyReservations(), loadRanks()];
+                     loadMyReservations(), loadRanks(), loadDueSoon()];
       if (isAdmin) tasks.push(loadAdmin());
       await Promise.all(tasks);
     } catch (e) { toast(e.message, true); }
@@ -549,6 +584,7 @@
         action = '<button class="small primary" data-borrow="' + b.id + '">借阅</button>';
       }
       action += ' <button class="small" data-rate="' + b.id + '">评分</button>';
+      action += ' <button class="small" data-history="' + b.id + '">历史</button>';
       if (isAdmin) {
         action +=
           ' <button class="small" data-edit="' + b.id + '">编辑</button>' +
@@ -907,6 +943,62 @@
     } catch (e) { $("recharge-err").textContent = e.message; }
   }
 
+  // ===== 即将到期 / 借阅历史 / 导出 =====
+  async function loadDueSoon() {
+    const d = await api("GET", "/api/my/due-soon");
+    const rows = $("due-rows");
+    rows.innerHTML = "";
+    $("due-empty").style.display = d.items.length ? "none" : "";
+    d.items.forEach((it) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(it.title) + "</td>" +
+        "<td>" + esc((it.deadline || "").slice(0, 16)) + "</td>" +
+        "<td>" + (it.days_left != null ? it.days_left + " 天" : "—") + "</td>";
+      rows.appendChild(tr);
+    });
+  }
+
+  async function openHistory(bookId, title) {
+    try {
+      const d = await api("GET", "/api/books/" + bookId + "/history");
+      $("history-title").textContent = "《" + (title || ("#" + bookId)) + "》借阅历史";
+      const rows = $("history-rows");
+      rows.innerHTML = "";
+      $("history-empty").style.display = d.history.length ? "none" : "";
+      d.history.forEach((h) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + esc(h.username || "—") + "</td>" +
+          "<td>" + esc((h.borrow_time || "").slice(0, 16)) + "</td>" +
+          "<td>" + esc((h.return_deadline || "").slice(0, 16)) + "</td>" +
+          "<td>" + esc((h.return_time || "未归还").slice(0, 16)) + "</td>";
+        rows.appendChild(tr);
+      });
+    } catch (e) { toast(e.message, true); }
+    $("history-mask").style.display = "flex";
+  }
+
+  async function downloadCsv(path, filename) {
+    const opts = { headers: {} };
+    if (token) opts.headers["Authorization"] = "Bearer " + token;
+    try {
+      const res = await fetch(path, opts);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || ("导出失败（" + res.status + "）"));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast("已开始下载 " + filename);
+    } catch (e) { toast(e.message, true); }
+  }
+
   // ===== 事件绑定 =====
   $("btn-login").onclick = login;
   $("login-pwd").onkeydown = (e) => { if (e.key === "Enter") login(); };
@@ -929,6 +1021,10 @@
   $("btn-search").onclick = () => { currentQuery = $("search-input").value.trim(); page = 1; loadBooks(); };
   $("search-input").onkeydown = (e) => { if (e.key === "Enter") $("btn-search").click(); };
   $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTags = []; page = 1; loadBooks(); loadTags(); };
+  $("btn-export").onclick = () => downloadCsv("/api/export/my-borrows", "my_borrows.csv");
+  $("btn-export-all").onclick = () => downloadCsv("/api/export/all-borrows", "all_borrows.csv");
+  $("btn-cancel-history").onclick = () => { $("history-mask").style.display = "none"; };
+  $("history-mask").addEventListener("click", (e) => { if (e.target === $("history-mask")) $("history-mask").style.display = "none"; });
   $("btn-clear-tag").onclick = () => { currentTags = []; loadBooks(); loadTags(); };
   $("tag-chips").addEventListener("click", (e) => {
     const chip = e.target.closest(".tag-chip");
@@ -982,6 +1078,13 @@
       const rid = parseInt(rateBtn.dataset.rate);
       const b = booksCache.find(x => x.id === rid);
       openRateModal(rid, b ? b.title : null);
+      return;
+    }
+    const histBtn = e.target.closest("button[data-history]");
+    if (histBtn) {
+      const hid = parseInt(histBtn.dataset.history);
+      const b = booksCache.find(x => x.id === hid);
+      openHistory(hid, b ? b.title : null);
       return;
     }
     const editBtn = e.target.closest("button[data-edit]");

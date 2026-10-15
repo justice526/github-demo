@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from core import db
 from core.errors import ValidationError, NotFoundError, BusinessRuleError
-from repository import book_repo, borrow_repo, reservation_repo, rules_repo
+from repository import book_repo, borrow_repo, reservation_repo, rules_repo, user_repo
 
 # 借阅期限与罚款费率（业务常量，集中在此便于调整）
 BORROW_DAYS = 7
@@ -237,8 +237,18 @@ def due_soon_books(user_id, days=3):
 
 
 def book_history(book_id, limit=30):
-    """某本书的借阅历史"""
-    return borrow_repo.find_history_by_book(book_id, limit)
+    """某本书的借阅历史（含借阅人用户名与归还状态）"""
+    out = []
+    for rec_id, user_id, borrow_time, deadline, return_time in borrow_repo.find_history_by_book(book_id, limit):
+        out.append({
+            "record_id": rec_id,
+            "user_id": user_id,
+            "username": user_repo.get_username(user_id) or "—",
+            "borrow_time": borrow_time,
+            "return_deadline": deadline,
+            "return_time": return_time,
+        })
+    return out
 
 
 def my_stats(user_id):
@@ -283,6 +293,29 @@ def all_borrows():
 def all_overdue():
     """全部逾期未还记录（管理员报表）"""
     return [b for b in all_borrows() if b["overdue"]]
+
+
+def csv_my_borrows(user_id):
+    """我的借阅记录 CSV 文本（utf-8-sig，供 Web 下载）"""
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["记录ID", "书名", "借出时间", "应还时间", "归还时间", "罚款"])
+    for r in my_records(user_id):
+        w.writerow([r["id"], r["title"], r["borrow_time"],
+                    r["deadline"], r["return_time"] or "", r["penalty"]])
+    return "\ufeff" + buf.getvalue()
+
+
+def csv_all_borrows():
+    """全部借阅记录 CSV 文本（管理员，utf-8-sig）"""
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["记录ID", "用户", "书名", "借出时间", "应还时间", "归还时间", "罚款"])
+    for r in borrow_repo.find_all():
+        w.writerow([r[0], r[1] or "", r[2] or "", r[3], r[4], r[5] or "", r[6]])
+    return "\ufeff" + buf.getvalue()
 
 
 # ==================== 导出 ====================

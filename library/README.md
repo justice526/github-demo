@@ -265,9 +265,14 @@ python web.py 9000     # 指定端口
 | GET | `/api/my/current` | 我当前未归还的借阅（含 book_id） |
 | GET | `/api/my/records` | 我的借阅记录 |
 | GET | `/api/my/summary` | 我的借阅摘要 |
+| GET | `/api/my/due-soon` | 即将到期提醒（`?days=`，默认 3 天） |
+| GET | `/api/my/stats` | 我的借阅统计（总数/在借/已还/逾期/未缴罚款） |
 | GET | `/api/my/reservations` | 我的预约（`?history=1` 含历史） |
 | GET | `/api/books/<id>/reservations` | 某书预约队列与人数 |
+| GET | `/api/books/<id>/history` | 某书借阅历史（含借阅人，需登录） |
 | GET | `/api/books/<id>/rating` + POST | 查看（含我的评分）/ 提交评分 |
+| GET | `/api/export/my-borrows` | 导出我的借阅记录为 CSV（下载） |
+| GET | `/api/export/all-borrows` | 导出全部借阅记录为 CSV（管理员，下载） |
 | GET | `/api/stats/dashboard` | 统计仪表盘 |
 | GET | `/api/books/rank` | 借阅排行 |
 | GET | `/api/books/top-rated` | 高分榜（`?top=`） |
