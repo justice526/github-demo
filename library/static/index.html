@@ -206,6 +206,11 @@
       <div class="card"><div class="label">已借出</div><div class="num" id="s-borrowed">-</div></div>
       <div class="card"><div class="label">我未归还</div><div class="num" id="s-mine">-</div></div>
       <div class="card"><div class="label">我的未缴罚款</div><div class="num" id="s-penalty">-</div></div>
+      <div class="card"><div class="label">我的余额</div><div class="num" id="s-balance">-</div></div>
+    </div>
+    <div class="admin-bar" id="pay-bar" style="display:none">
+      <span class="badge" id="pay-hint" style="background:#fdecea;color:var(--danger)"></span>
+      <button class="danger small" id="btn-pay-fine">缴纳罚款</button>
     </div>
 
     <!-- 管理员工具栏（仅管理员可见） -->
@@ -296,6 +301,23 @@
 
     <!-- 管理员面板：用户管理 + 逾期报表 -->
     <div id="admin-panel" style="display:none">
+      <h3 style="margin:22px 0 10px; font-size:15px">借阅规则</h3>
+      <div class="table-wrap">
+        <div class="field" style="display:inline-block; margin-right:14px">
+          <label>借阅上限（本）</label>
+          <input id="r-limit" type="number" min="1" max="50" style="width:90px">
+        </div>
+        <div class="field" style="display:inline-block">
+          <label>欠费停借阈值（元，0=不限制）</label>
+          <input id="r-threshold" type="number" min="0" max="10000" step="0.1" style="width:110px">
+        </div>
+        <div style="margin-top:10px">
+          <button class="primary small" id="btn-save-rules">保存规则</button>
+          <span id="rules-msg" style="color:var(--muted); font-size:13px; margin-left:10px"></span>
+        </div>
+      </div>
+
+
       <div class="admin-bar" style="display:flex">
         <span class="badge">管理员</span>
         <button class="primary small" id="btn-export-all">导出全部借阅 CSV</button>
@@ -539,7 +561,7 @@
     try {
       const tasks = [loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
                      loadMyReservations(), loadRanks(), loadDueSoon()];
-      if (isAdmin) tasks.push(loadAdmin());
+      if (isAdmin) { tasks.push(loadAdmin()); tasks.push(loadRules()); }
       await Promise.all(tasks);
     } catch (e) { toast(e.message, true); }
   }
@@ -548,11 +570,20 @@
     const dash = await api("GET", "/api/stats/dashboard");
     const mine = await api("GET", "/api/my/summary");
     const pen = await api("GET", "/api/me/penalty");
+    const bal = await api("GET", "/api/me/balance");
     $("s-total").textContent = dash.total_book;
     $("s-avail").textContent = dash.available;
     $("s-borrowed").textContent = dash.borrowed;
     $("s-mine").textContent = mine.borrowed;
-    $("s-penalty").textContent = (pen.unpaid_penalty || 0) + " 元";
+    $("s-balance").textContent = (bal.balance ?? 0) + " 元";
+    const penalty = pen.unpaid_penalty || 0;
+    $("s-penalty").textContent = penalty + " 元";
+    if (penalty > 0) {
+      $("pay-hint").textContent = "你有 " + penalty + " 元罚款待缴";
+      $("pay-bar").style.display = "flex";
+    } else {
+      $("pay-bar").style.display = "none";
+    }
   }
 
   async function loadBooks() {
@@ -999,6 +1030,45 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  // ===== 缴纳罚款 / 借阅规则 =====
+  async function payFine() {
+    try {
+      const d = await api("POST", "/api/me/pay-fine");
+      toast("已缴纳罚款 " + d.paid + " 元，余额 " + d.balance + " 元");
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function loadRules() {
+    try {
+      const d = await api("GET", "/api/rules");
+      $("r-limit").value = d.borrow_limit != null ? d.borrow_limit : "";
+      $("r-threshold").value = d.fine_threshold != null ? d.fine_threshold : "";
+    } catch (e) { /* 非管理员静默 */ }
+  }
+
+  async function saveRules() {
+    const limit = parseInt($("r-limit").value, 10);
+    const thr = parseFloat($("r-threshold").value);
+    if (!(limit >= 1) || !(thr >= 0)) {
+      $("rules-msg").textContent = "请输入合法数值";
+      $("rules-msg").style.color = "var(--danger)";
+      return;
+    }
+    $("rules-msg").textContent = "";
+    try {
+      const d = await api("POST", "/api/rules",
+                         { borrow_limit: limit, fine_threshold: thr });
+      $("rules-msg").textContent = "已保存（上限 " + d.borrow_limit +
+        "，阈值 " + d.fine_threshold + "）";
+      $("rules-msg").style.color = "var(--success)";
+      await loadRules();
+    } catch (e) {
+      $("rules-msg").textContent = e.message;
+      $("rules-msg").style.color = "var(--danger)";
+    }
+  }
+
   // ===== 事件绑定 =====
   $("btn-login").onclick = login;
   $("login-pwd").onkeydown = (e) => { if (e.key === "Enter") login(); };
@@ -1023,6 +1093,8 @@
   $("btn-reset").onclick = () => { $("search-input").value = ""; currentQuery = ""; currentTags = []; page = 1; loadBooks(); loadTags(); };
   $("btn-export").onclick = () => downloadCsv("/api/export/my-borrows", "my_borrows.csv");
   $("btn-export-all").onclick = () => downloadCsv("/api/export/all-borrows", "all_borrows.csv");
+  $("btn-pay-fine").onclick = payFine;
+  $("btn-save-rules").onclick = saveRules;
   $("btn-cancel-history").onclick = () => { $("history-mask").style.display = "none"; };
   $("history-mask").addEventListener("click", (e) => { if (e.target === $("history-mask")) $("history-mask").style.display = "none"; });
   $("btn-clear-tag").onclick = () => { currentTags = []; loadBooks(); loadTags(); };

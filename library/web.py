@@ -40,6 +40,10 @@
     GET    /api/books/<id>/history 某书借阅历史
     GET    /api/export/my-borrows  导出我的借阅记录 CSV
     GET    /api/export/all-borrows 导出全部借阅记录 CSV（管理员）
+    GET    /api/me/balance         我的余额
+    POST   /api/me/pay-fine        缴纳我的全部未结清罚款（从余额扣）
+    GET    /api/rules              查看借阅规则（借阅上限/欠费阈值）
+    POST   /api/rules              设置借阅规则（管理员）
     GET    /api/books              图书列表（?page=&size=&q=&category=&tag=a&tag=b&match=any|all）
     GET    /api/books/<id>         图书详情
     POST   /api/books              新增图书（管理员）
@@ -79,7 +83,7 @@ from core.errors import http_status_of
 from core.db import get_conn, close_connection
 from repository import book_repo, borrow_repo, tag_repo, refresh_token_repo
 from service import (book_service, user_service, borrow_service,
-                     rating_service, reservation_service, tag_service)
+                     rating_service, reservation_service, tag_service, rules_service)
 
 # 标签与刷新令牌表：导入时幂等建表，保证任何启动路径表都存在。
 tag_repo.init_table()
@@ -452,6 +456,46 @@ def admin_overdue(handler):
     """全部逾期未还记录（管理员报表）"""
     _require_admin(handler)
     return _ok(handler, {"overdue": borrow_service.all_overdue()})
+
+
+# ---- 余额 / 罚款 / 规则 ----
+
+@_register("GET", r"/api/me/balance")
+def my_balance(handler):
+    """我的余额"""
+    uid = _require_user(handler)
+    return _ok(handler, {"balance": user_service.get_balance(uid)})
+
+
+@_register("POST", r"/api/me/pay-fine")
+def pay_fine_ep(handler):
+    """缴纳我的全部未结清罚款（从余额扣除，原子操作）"""
+    uid = _require_user(handler)
+    total = borrow_service.my_total_penalty(uid)
+    if total <= 0:
+        raise BusinessRuleError("当前没有待缴纳的罚款")
+    user_service.pay_fine(uid, total)  # 余额不足时抛 BusinessRuleError(422)
+    return _ok(handler, {"paid": round(float(total), 2),
+                        "balance": user_service.get_balance(uid)})
+
+
+@_register("GET", r"/api/rules")
+def get_rules(handler):
+    """查看借阅规则参数（borrow_limit / fine_threshold）"""
+    _require_user(handler)
+    return _ok(handler, rules_service.rule_config())
+
+
+@_register("POST", r"/api/rules")
+def set_rules(handler):
+    """设置借阅规则参数（管理员）"""
+    _require_admin(handler)
+    data = _read_json(handler)
+    if "borrow_limit" in data:
+        rules_service.set_borrow_limit(data["borrow_limit"])
+    if "fine_threshold" in data:
+        rules_service.set_fine_threshold(data["fine_threshold"])
+    return _ok(handler, rules_service.rule_config())
 
 
 # ---- 图书 ----

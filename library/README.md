@@ -248,6 +248,10 @@ python web.py 9000     # 指定端口
 | GET | `/api/security-question` | 取密保问题 `?username=`（找回密码前置，公开） |
 | POST | `/api/reset-password` | 通过密保重置密码 `{username, answer, new_password}`（公开） |
 | GET | `/api/me/penalty` | 我的未结清罚款总额（需登录） |
+| GET | `/api/me/balance` | 我的余额 |
+| POST | `/api/me/pay-fine` | 缴纳我的全部未结清罚款（从余额扣） |
+| GET | `/api/rules` | 查看借阅规则（借阅上限 / 欠费阈值） |
+| POST | `/api/rules` | 设置借阅规则（管理员） |
 | GET | `/api/users` | 用户列表（管理员） |
 | POST | `/api/users/<id>/recharge` | 给用户充值 `{amount}`（管理员） |
 | GET | `/api/admin/borrows` | 全部借阅记录（管理员） |
