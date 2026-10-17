@@ -145,12 +145,52 @@
   .tag-chip.active .c { opacity: .85; }
   .tc-sep { font-size: 12px; color: var(--muted); margin-left: 6px; }
   .tc-mode.active { background: var(--accent); color: #fff; }
+
+  /* 通知中心（铃铛 + 下拉面板） */
+  .bell-wrap { position: relative; flex: none; }
+  #btn-bell { position: relative; font-size: 16px; padding: 6px 10px; line-height: 1; }
+  .notif-badge {
+    position: absolute; top: -7px; right: -7px;
+    background: var(--danger); color: #fff; font-size: 11px; font-weight: 600;
+    min-width: 17px; height: 17px; line-height: 17px; border-radius: 9px;
+    padding: 0 4px; text-align: center; box-sizing: border-box;
+  }
+  .notif-panel {
+    position: absolute; top: 44px; right: 0; width: 330px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.14);
+    z-index: 60; max-height: 440px; overflow-y: auto;
+  }
+  .notif-head { display: flex; justify-content: space-between; align-items: center;
+    padding: 11px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .notif-list { list-style: none; margin: 0; padding: 0; }
+  .notif-item { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .notif-item:last-child { border-bottom: none; }
+  .notif-item .nt { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .notif-item .nd { color: var(--muted); margin-top: 3px; line-height: 1.5; }
+  .notif-item.read { opacity: .58; }
+  .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+  .notif-type { font-size: 11px; margin-left: auto; padding: 1px 7px; border-radius: 8px; flex: none; }
+  .t-overdue { background: #fdecea; color: var(--danger); }
+  .t-due_soon { background: #fff3e0; color: var(--warn); }
+  .t-ready { background: #eaf0ff; color: var(--accent-dk); }
 </style>
 </head>
 <body>
   <div class="topbar">
     <h1>📚 图书管理系统</h1>
     <div class="spacer"></div>
+    <div class="bell-wrap">
+      <button class="small" id="btn-bell" style="display:none" title="通知中心">🔔<span id="notif-badge" class="notif-badge" style="display:none">0</span></button>
+      <div class="notif-panel" id="notif-panel" style="display:none">
+        <div class="notif-head">
+          <span>通知中心</span>
+          <button class="link small" id="btn-notif-readall">全部已读</button>
+        </div>
+        <ul class="notif-list" id="notif-list"></ul>
+        <div class="empty" id="notif-empty" style="display:none">暂无通知</div>
+      </div>
+    </div>
     <span class="who" id="who"></span>
     <button class="small" id="btn-pwd" style="display:none">修改密码</button>
     <button class="small" id="btn-logout" style="display:none">退出</button>
@@ -457,6 +497,7 @@
       page = 1, pageSize = 10, refreshing = false;
   let myReserveBookIds = new Set(), includeResHistory = false;
   let currentQuery = "", booksCache = [], editingId = null, currentTags = [], tagMatch = "any", tagPrefillOk = false;
+  let notifTimer = null;
 
   // ===== 基础请求封装（含访问令牌过期自动续期）=====
   async function api(method, path, body, _retry = true) {
@@ -525,11 +566,13 @@
       $("main-view").style.display = "block";
       $("btn-logout").style.display = "";
       $("btn-pwd").style.display = "";
+      $("btn-bell").style.display = "";
       $("who").textContent = "当前用户：" + currentUser + (isAdmin ? "（管理员）" : "");
       $("admin-bar").style.display = isAdmin ? "flex" : "none";
       $("admin-panel").style.display = isAdmin ? "block" : "none";
       $("login-pwd").value = "";
       await refresh();
+      startNotifPolling();
     } catch (e) {
       $("login-err").textContent = e.message;
     }
@@ -547,12 +590,16 @@
     }
     token = null; refreshToken = null; currentUser = null;
     isAdmin = false; page = 1;
+    stopNotifPolling();
+    $("notif-panel").style.display = "none";
     $("admin-bar").style.display = "none";
     $("admin-panel").style.display = "none";
     $("main-view").style.display = "none";
     $("login-view").style.display = "block";
     $("btn-logout").style.display = "none";
     $("btn-pwd").style.display = "none";
+    $("btn-bell").style.display = "none";
+    $("notif-badge").style.display = "none";
     $("who").textContent = "";
   }
 
@@ -560,7 +607,8 @@
   async function refresh() {
     try {
       const tasks = [loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
-                     loadMyReservations(), loadRanks(), loadDueSoon()];
+                     loadMyReservations(), loadRanks(), loadDueSoon(),
+                     loadNotifications()];
       if (isAdmin) { tasks.push(loadAdmin()); tasks.push(loadRules()); }
       await Promise.all(tasks);
     } catch (e) { toast(e.message, true); }
@@ -1069,11 +1117,71 @@
     }
   }
 
+  // ===== 通知中心（轮询聚合）=====
+  const NOTIF_TYPE_TAG = { overdue: "逾期", due_soon: "即将到期", ready: "待取" };
+
+  async function loadNotifications() {
+    if (!token) return;
+    try {
+      const d = await api("GET", "/api/notifications");
+      renderNotifications(d.items || [], d.unread || 0);
+    } catch (e) { /* 通知为增强体验，失败静默 */ }
+  }
+
+  function renderNotifications(items, unread) {
+    const badge = $("notif-badge");
+    if (unread > 0) {
+      badge.style.display = "";
+      badge.textContent = unread > 99 ? "99+" : String(unread);
+    } else {
+      badge.style.display = "none";
+    }
+    const list = $("notif-list");
+    list.innerHTML = "";
+    $("notif-empty").style.display = items.length ? "none" : "";
+    items.forEach((it) => {
+      const li = document.createElement("li");
+      li.className = "notif-item " + (it.read ? "read" : "unread");
+      const tag = NOTIF_TYPE_TAG[it.type] || "";
+      li.innerHTML =
+        '<div class="nt">' +
+          (it.read ? "" : '<span class="notif-dot"></span>') +
+          "<span>" + esc(it.title) + "</span>" +
+          (tag ? '<span class="notif-type t-' + it.type + '">' + tag + "</span>" : "") +
+        "</div>" +
+        '<div class="nd">' + esc(it.detail) + "</div>";
+      list.appendChild(li);
+    });
+  }
+
+  async function markAllRead() {
+    try {
+      await api("POST", "/api/notifications/read", { all: true });
+      await loadNotifications();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function startNotifPolling() {
+    stopNotifPolling();
+    notifTimer = setInterval(loadNotifications, 30000);  // 每 30 秒轮询一次
+  }
+  function stopNotifPolling() {
+    if (notifTimer) { clearInterval(notifTimer); notifTimer = null; }
+  }
+
   // ===== 事件绑定 =====
   $("btn-login").onclick = login;
   $("login-pwd").onkeydown = (e) => { if (e.key === "Enter") login(); };
   $("btn-logout").onclick = logout;
   $("btn-pwd").onclick = openPwdModal;
+  $("btn-bell").onclick = (e) => {
+    e.stopPropagation();
+    const p = $("notif-panel");
+    p.style.display = p.style.display === "none" ? "block" : "none";
+  };
+  $("btn-notif-readall").onclick = (e) => { e.stopPropagation(); markAllRead(); };
+  $("notif-panel").addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => { $("notif-panel").style.display = "none"; });
   $("btn-cancel-pwd").onclick = () => { $("pwd-mask").style.display = "none"; };
   $("btn-save-pwd").onclick = submitPwd;
   $("pwd-mask").addEventListener("click", (e) => { if (e.target === $("pwd-mask")) $("pwd-mask").style.display = "none"; });

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图书管理系统 · 统计报告 2026-10-16</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+         background: #eef1f6; color: #2c3e50; margin: 0; padding: 28px 20px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { background: #ffffff; border: 1px solid #dfe4ec; border-radius: 12px;
+            padding: 22px 26px; margin-bottom: 18px; }
+  h1 { margin: 0 0 6px; font-size: 21px; color: #3d6cf5; font-weight: 600; }
+  .meta { font-size: 13px; color: #7f8c8d; }
+  section { margin-bottom: 22px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 10px; color: #2c3e50;
+        padding-left: 9px; border-left: 3px solid #3d6cf5; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; }
+  .card { flex: 1 1 140px; background: #fff; border: 1px solid #dfe4ec;
+           border-radius: 10px; padding: 14px 16px; }
+  .k { font-size: 12px; color: #7f8c8d; margin-bottom: 6px; }
+  .num { font-size: 25px; font-weight: 600; color: #3d6cf5; line-height: 1.15; }
+  .num.sm { font-size: 17px; }
+  .unit { font-size: 12px; color: #7f8c8d; margin-left: 3px; font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; background: #fff; overflow: hidden;
+           border: 1px solid #dfe4ec; border-radius: 10px; }
+  th, td { padding: 9px 13px; text-align: left; font-size: 13px;
+            border-bottom: 1px solid #eef1f6; }
+  th { background: #e6eaf2; font-weight: 600; color: #2c3e50; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.c { text-align: center; width: 78px; }
+  td.star { color: #e67e22; letter-spacing: 1px; }
+  td.empty { text-align: center; color: #7f8c8d; padding: 18px; }
+  .bar { height: 12px; background: #3d6cf5; border-radius: 3px; min-width: 4px; }
+  footer { text-align: center; font-size: 12px; color: #7f8c8d; padding: 12px 0 4px; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    header, .card, table { border-color: #ccc; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>个人图书管理系统 · 统计报告</h1>
+    <div class="meta">生成时间：2026-10-16 23:28:24 &nbsp;|&nbsp; 生成人：系统</div>
+  </header>
+
+  <section>
+    <h2>总体概览</h2>
+    <div class="cards"><div class="card"><div class="k">图书总数</div><div class="num">35<span class="unit">本</span></div></div><div class="card"><div class="k">在架可借</div><div class="num">34<span class="unit">本</span></div></div><div class="card"><div class="k">已借出</div><div class="num">1<span class="unit">本</span></div></div><div class="card"><div class="k">注册用户</div><div class="num">1<span class="unit">人</span></div></div><div class="card"><div class="k">借阅记录</div><div class="num">1<span class="unit">条</span></div></div><div class="card"><div class="k">逾期未还</div><div class="num">1<span class="unit">条</span></div></div></div>
+  </section>
+
+  <section>
+    <h2>图书分类统计</h2>
+    
+    <table>
+      <thead><tr><th>分类</th><th>总数</th><th>在架</th><th>借出</th><th>占比</th></tr></thead>
+      <tbody><tr><td>人工智能</td><td class="c">4</td><td class="c">4</td><td class="c">0</td><td><div class="bar" style="width:67%"></div></td></tr><tr><td>历史</td><td class="c">4</td><td class="c">4</td><td class="c">0</td><td><div class="bar" style="width:67%"></div></td></tr><tr><td>古典文学</td><td class="c">4</td><td class="c">4</td><td class="c">0</td><td><div class="bar" style="width:67%"></div></td></tr><tr><td>外国文学</td><td class="c">5</td><td class="c">4</td><td class="c">1</td><td><div class="bar" style="width:83%"></div></td></tr><tr><td>现代文学</td><td class="c">4</td><td class="c">4</td><td class="c">0</td><td><div class="bar" style="width:67%"></div></td></tr><tr><td>电子工程</td><td class="c">2</td><td class="c">2</td><td class="c">0</td><td><div class="bar" style="width:33%"></div></td></tr><tr><td>科幻小说</td><td class="c">4</td><td class="c">4</td><td class="c">0</td><td><div class="bar" style="width:67%"></div></td></tr><tr><td>经济管理</td><td class="c">2</td><td class="c">2</td><td class="c">0</td><td><div class="bar" style="width:33%"></div></td></tr><tr><td>计算机</td><td class="c">6</td><td class="c">6</td><td class="c">0</td><td><div class="bar" style="width:100%"></div></td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>借阅次数排行 Top 10</h2>
+    
+    <table>
+      <thead><tr><th>名次</th><th>书名</th><th>作者</th><th>借阅次数</th></tr></thead>
+      <tbody><tr><td class="c">1</td><td>局外人</td><td>加缪</td><td class="c">1</td></tr><tr><td class="c">2</td><td>Python编程：从入门到实践</td><td>埃里克·马瑟斯</td><td class="c">0</td></tr><tr><td class="c">3</td><td>数据结构与算法分析</td><td>马克·艾伦</td><td class="c">0</td></tr><tr><td class="c">4</td><td>计算机网络：自顶向下方法</td><td>库罗斯</td><td class="c">0</td></tr><tr><td class="c">5</td><td>深入理解计算机系统</td><td>兰德尔·布莱恩特</td><td class="c">0</td></tr><tr><td class="c">6</td><td>算法导论</td><td>科尔曼</td><td class="c">0</td></tr><tr><td class="c">7</td><td>代码整洁之道</td><td>罗伯特·马丁</td><td class="c">0</td></tr><tr><td class="c">8</td><td>三体</td><td>刘慈欣</td><td class="c">0</td></tr><tr><td class="c">9</td><td>流浪地球</td><td>刘慈欣</td><td class="c">0</td></tr><tr><td class="c">10</td><td>球状闪电</td><td>刘慈欣</td><td class="c">0</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>读者好评排行 Top 10</h2>
+    
+    <table>
+      <thead><tr><th>名次</th><th>书名</th><th>作者</th><th>平均分</th><th>分数</th><th>人数</th></tr></thead>
+      <tbody><tr><td colspan="6" class="empty">暂无评分数据</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>风控提示</h2>
+    <div class="cards">
+      <div class="card"><div class="k">逾期未还</div><div class="num">1<span class="unit">条</span></div></div>
+      <div class="card"><div class="k">涉及人数</div><div class="num">1<span class="unit">人</span></div></div>
+      <div class="card"><div class="k">累计罚款</div><div class="num">0.0<span class="unit">元</span></div></div>
+      <div class="card"><div class="k">评分总数</div><div class="num">0<span class="unit">条</span></div></div>
+      <div class="card"><div class="k">平均评分</div><div class="num">0<span class="unit">分</span></div></div>
+    </div>
+  </section>
+
+  <footer>本报告由个人图书管理系统自动生成，数据来源于本地 SQLite 数据库。</footer>
+</div>
+</body>
+</html>

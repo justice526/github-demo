@@ -15,4 +15,5 @@
 __all__ = [
     "book_service", "user_service", "borrow_service", "reservation_service",
     "rating_service", "tag_service", "log_service", "rules_service",
+    "notification_service",
 ]

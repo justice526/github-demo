@@ -273,6 +273,8 @@ python web.py 9000     # 指定端口
 | GET | `/api/my/stats` | 我的借阅统计（总数/在借/已还/逾期/未缴罚款） |
 | GET | `/api/my/reservations` | 我的预约（`?history=1` 含历史） |
 | GET | `/api/books/<id>/reservations` | 某书预约队列与人数 |
+| GET | `/api/notifications` | 通知中心：聚合待取预约 / 即将到期 / 逾期未还，返回 `{items:[{key,type,title,detail,ts,read}], unread}`（需登录） |
+| POST | `/api/notifications/read` | 标记通知已读 `{keys:[...]}` 指定 key，或 `{all:true}` 全部已读（需登录） |
 | GET | `/api/books/<id>/history` | 某书借阅历史（含借阅人，需登录） |
 | GET | `/api/books/<id>/rating` + POST | 查看（含我的评分）/ 提交评分 |
 | GET | `/api/export/my-borrows` | 导出我的借阅记录为 CSV（下载） |
@@ -319,6 +321,9 @@ python web.py 9000     # 指定端口
 - 访问令牌过期/失效时，先用 `refresh_token` 调 `/api/refresh` 续期（拿到新 `token`
   + 新 `refresh_token`），失败则跳登录。前端 `static/index.html` 已内置该自动续期逻辑。
 - 退出时调 `/api/logout` 吊销刷新令牌，避免令牌被长期盗用。
+- 通知中心：`static/index.html` 顶栏铃铛每 30 秒轮询一次 `/api/notifications`（令牌走
+  `Authorization` 头，避免把令牌放进 URL/WebSocket 的隐患），聚合「待取 / 即将到期 / 逾期」
+  三类提醒并显示未读红点；点「全部已读」调 `/api/notifications/read {all:true}`。
 
 > ⚠️ 演示默认 `JWT_SECRET` 为明文硬编码占位值，仅用于本地开发；任何生产部署都
 > 必须通过环境变量注入强随机密钥，并全链路启用 HTTPS。

@@ -65,6 +65,8 @@
     POST   /api/reserve/cancel      取消预约 {book_id}
     GET    /api/my/reservations     我的预约（?history=1 含历史）
     GET    /api/books/<id>/reservations  某书预约队列与人数
+    GET    /api/notifications        我的通知中心（聚合待取/即将到期/逾期，含未读数）
+    POST   /api/notifications/read   标记通知已读 {keys:[...]} 或 {all:true}
 """
 
 import json
@@ -81,13 +83,16 @@ from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
                          ValidationError, BusinessRuleError, RateLimitError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection
-from repository import book_repo, borrow_repo, tag_repo, refresh_token_repo
+from repository import (book_repo, borrow_repo, tag_repo, refresh_token_repo,
+                       notification_repo)
 from service import (book_service, user_service, borrow_service,
-                     rating_service, reservation_service, tag_service, rules_service)
+                     rating_service, reservation_service, tag_service,
+                     rules_service, notification_service)
 
 # 标签与刷新令牌表：导入时幂等建表，保证任何启动路径表都存在。
 tag_repo.init_table()
 refresh_token_repo.init_table()
+notification_repo.init_table()
 close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
 # ===== 生产加固配置（来自环境变量，缺省为演示值；生产务必设置 JWT_SECRET）=====
@@ -735,6 +740,31 @@ def book_queue(handler, bid):
     _require_user(handler)
     return _ok(handler, {"queue": reservation_service.queue_of(int(bid)),
                          "count": reservation_service.reservation_count(int(bid))})
+
+
+# ---- 通知中心（轮询聚合）----
+
+@_register("GET", r"/api/notifications")
+def notifications(handler):
+    """我的通知中心：聚合待取预约 / 即将到期 / 逾期未还，含未读计数"""
+    uid = _require_user(handler)
+    data = notification_service.build(uid)
+    return _ok(handler, data)
+
+
+@_register("POST", r"/api/notifications/read")
+def notifications_read(handler):
+    """标记通知已读：{keys:[...]} 指定 key，或 {all:true} 全部已读"""
+    uid = _require_user(handler)
+    data = _read_json(handler)
+    if data.get("all"):
+        keys = notification_service.current_keys(uid)
+    else:
+        keys = data.get("keys") or []
+    if not isinstance(keys, list):
+        raise ValidationError("keys 应为字符串数组")
+    marked = notification_service.mark_read(uid, [str(k) for k in keys])
+    return _ok(handler, {"marked": marked})
 
 
 # ---- 统计 ----
