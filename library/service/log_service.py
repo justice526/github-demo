@@ -11,6 +11,8 @@ ACTION_TEXT = {
     "register": "注册",
     "login": "登录",
     "logout": "退出",
+    "change_password": "修改密码",
+    "reset_password": "找回密码",
     "borrow": "借阅",
     "return": "归还",
     "renew": "续借",
@@ -24,6 +26,7 @@ ACTION_TEXT = {
     "update_book": "修改图书",
     "delete_book": "删除图书",
     "set_tag": "设置标签",
+    "set_rules": "设置规则",
     "import_book": "批量导入",
     "export": "导出数据",
     "backup": "备份数据",
@@ -55,11 +58,11 @@ def write(user_id, action, target="", detail=""):
 
 
 def query(limit=100, action=None, user_id=None):
-    """查询日志：[{id, username, action, action_text, target, detail, log_time}]"""
+    """查询日志：[{id, user_id, username, action, action_text, target, detail, log_time}]"""
     return [
-        {"id": r[0], "username": r[1], "action": r[2],
-         "action_text": action_text(r[2]), "target": r[3],
-         "detail": r[4], "log_time": r[5]}
+        {"id": r[0], "user_id": r[1], "username": r[2], "action": r[3],
+         "action_text": action_text(r[3]), "target": r[4],
+         "detail": r[5], "log_time": r[6]}
         for r in log_repo.find_logs(limit, action, user_id)
     ]
 

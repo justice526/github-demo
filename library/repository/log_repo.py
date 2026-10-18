@@ -78,7 +78,7 @@ def find_logs(limit=100, action=None, user_id=None):
     if not table_ready():
         return []
     sql = """
-        SELECT id, username, action, target, detail, log_time
+        SELECT id, user_id, username, action, target, detail, log_time
         FROM operation_log WHERE 1=1
     """
     params = []

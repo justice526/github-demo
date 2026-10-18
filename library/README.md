@@ -237,6 +237,8 @@ python web.py 9000     # 指定端口
 
 > 启动后访问 `/` 即打开内置单页前端（登录后可借还、预约、评分、管理图书、查看排行榜）。
 
+> REST 层同样写入**操作审计日志**（与 CLI / GUI 共用 `operation_log` 表）：登录、借还、续借、预约/取消、评分、充值、缴罚款、改密/找回密码、增删改图书、设置标签与规则等都会被记录，管理员可经 `GET /api/admin/logs` 查看（前端「操作日志」面板）。写日志失败不影响主业务流程。
+
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | 健康检查 |
@@ -256,6 +258,7 @@ python web.py 9000     # 指定端口
 | POST | `/api/users/<id>/recharge` | 给用户充值 `{amount}`（管理员） |
 | GET | `/api/admin/borrows` | 全部借阅记录（管理员） |
 | GET | `/api/admin/overdue` | 逾期未还报表（管理员） |
+| GET | `/api/admin/logs` | 操作审计日志（管理员，`?limit=&action=&user_id=`，返回 `{logs, total, stats}`，覆盖登录/借还/预约/充值/缴罚款/改密/规则变更等） |
 | GET | `/api/books` | 图书列表（`?q=关键词&category=分类&tag=a&tag=b&match=any\|all&page=&size=`，附均分/人数） |
 | GET | `/api/books/<id>` | 图书详情（含评分与标签） |
 | POST / PUT / DELETE | `/api/books[/<id>]` | 增改删（管理员，需 token） |

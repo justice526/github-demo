@@ -35,6 +35,7 @@
     POST   /api/users/<id>/recharge 给用户充值 {amount}（管理员）
     GET    /api/admin/borrows      全部借阅记录（管理员）
     GET    /api/admin/overdue      逾期未还报表（管理员）
+    GET    /api/admin/logs         操作审计日志（管理员，?limit=&action=&user_id=，含统计）
     GET    /api/my/due-soon        即将到期提醒（?days=，默认 3 天）
     GET    /api/my/stats           我的借阅统计
     GET    /api/books/<id>/history 某书借阅历史
@@ -84,15 +85,16 @@ from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
 from core.errors import http_status_of
 from core.db import get_conn, close_connection
 from repository import (book_repo, borrow_repo, tag_repo, refresh_token_repo,
-                       notification_repo)
+                       notification_repo, log_repo)
 from service import (book_service, user_service, borrow_service,
                      rating_service, reservation_service, tag_service,
-                     rules_service, notification_service)
+                     rules_service, notification_service, log_service)
 
 # 标签与刷新令牌表：导入时幂等建表，保证任何启动路径表都存在。
 tag_repo.init_table()
 refresh_token_repo.init_table()
 notification_repo.init_table()
+log_repo.init_table()
 close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
 # ===== 生产加固配置（来自环境变量，缺省为演示值；生产务必设置 JWT_SECRET）=====
@@ -143,6 +145,14 @@ def _require_admin(handler):
     if not user_service.is_admin(uid):
         raise PermissionError_("该操作仅管理员可执行")
     return uid
+
+
+def _audit(action, uid, target="", detail=""):
+    """写操作审计日志（最佳努力，失败绝不抛异常、不影响主流程）"""
+    try:
+        log_service.write(uid, action, target, detail)
+    except Exception:
+        pass
 
 
 def _rate_allowed(handler):
@@ -354,6 +364,7 @@ def health(handler):
 def login(handler):
     data = _read_json(handler)
     uid = user_service.login(data.get("username", ""), data.get("password", ""))
+    _audit("login", uid, data.get("username", ""), "登录成功")
     access, refresh = _issue_tokens(uid)
     return _ok(handler, {"token": access, "refresh_token": refresh,
                          "user_id": uid,
@@ -379,8 +390,10 @@ def logout(handler):
     """吊销刷新令牌（最佳努力，失败不报错）"""
     data = _read_json(handler)
     rt = data.get("refresh_token", "")
+    ruid = refresh_token_repo.validate(rt) if rt else None
     if rt:
         refresh_token_repo.revoke(rt)
+    _audit("logout", ruid)
     return _ok(handler, {"logged_out": True})
 
 
@@ -389,6 +402,7 @@ def register(handler):
     data = _read_json(handler)
     uid = user_service.register(data.get("username", ""), data.get("password", ""),
                                 data.get("security_q", ""), data.get("security_a", ""))
+    _audit("register", uid, data.get("username", ""))
     return _ok(handler, {"user_id": uid}, status=201)
 
 
@@ -401,6 +415,8 @@ def change_password(handler):
     data = _read_json(handler)
     ok = user_service.modify_password(
         uid, data.get("old_password", ""), data.get("new_password", ""))
+    if ok:
+        _audit("change_password", uid)
     return _ok(handler, {"changed": ok})
 
 
@@ -419,8 +435,11 @@ def security_question(handler):
 def reset_password(handler):
     """通过密保答案重置密码（公开接口）"""
     data = _read_json(handler)
+    username = data.get("username", "")
     ok = user_service.reset_password_by_qa(
-        data.get("username", ""), data.get("answer", ""), data.get("new_password", ""))
+        username, data.get("answer", ""), data.get("new_password", ""))
+    if ok:
+        _audit("reset_password", None, username, "密保找回重置密码")
     return _ok(handler, {"reset": ok})
 
 
@@ -443,9 +462,11 @@ def list_users(handler):
 @_register("POST", r"/api/users/(?P<uid>\d+)/recharge")
 def recharge_user(handler, uid):
     """给某用户充值余额（管理员）"""
-    _require_admin(handler)
+    aid = _require_admin(handler)
     data = _read_json(handler)
-    user_service.recharge(int(uid), data.get("amount"))
+    amount = data.get("amount")
+    user_service.recharge(int(uid), amount)
+    _audit("recharge", aid, "用户#%s" % uid, "充值 %s 元" % amount)
     return _ok(handler, {"balance": user_service.get_balance(int(uid))})
 
 
@@ -461,6 +482,20 @@ def admin_overdue(handler):
     """全部逾期未还记录（管理员报表）"""
     _require_admin(handler)
     return _ok(handler, {"overdue": borrow_service.all_overdue()})
+
+
+@_register("GET", r"/api/admin/logs")
+def admin_logs(handler):
+    """操作审计日志（管理员）：可按 action / user_id 过滤，含动作统计与总数"""
+    _require_admin(handler)
+    qs = parse_qs(urlparse(handler.path).query)
+    limit = int((qs.get("limit") or ["100"])[0])
+    action = (qs.get("action") or [""])[0].strip() or None
+    uid_raw = (qs.get("user_id") or [""])[0].strip()
+    uid_filter = int(uid_raw) if uid_raw.isdigit() else None
+    logs = log_service.query(limit, action, uid_filter)
+    return _ok(handler, {"logs": logs, "total": log_service.count(),
+                         "stats": log_service.action_stats()})
 
 
 # ---- 余额 / 罚款 / 规则 ----
@@ -480,6 +515,7 @@ def pay_fine_ep(handler):
     if total <= 0:
         raise BusinessRuleError("当前没有待缴纳的罚款")
     user_service.pay_fine(uid, total)  # 余额不足时抛 BusinessRuleError(422)
+    _audit("pay_fine", uid, "", "缴纳 %s 元" % round(float(total), 2))
     return _ok(handler, {"paid": round(float(total), 2),
                         "balance": user_service.get_balance(uid)})
 
@@ -494,12 +530,13 @@ def get_rules(handler):
 @_register("POST", r"/api/rules")
 def set_rules(handler):
     """设置借阅规则参数（管理员）"""
-    _require_admin(handler)
+    aid = _require_admin(handler)
     data = _read_json(handler)
     if "borrow_limit" in data:
         rules_service.set_borrow_limit(data["borrow_limit"])
     if "fine_threshold" in data:
         rules_service.set_fine_threshold(data["fine_threshold"])
+    _audit("set_rules", aid, "", "调整借阅规则")
     return _ok(handler, rules_service.rule_config())
 
 
@@ -562,36 +599,40 @@ def get_book(handler, bid):
 
 @_register("POST", r"/api/books")
 def add_book(handler):
-    _require_admin(handler)
+    aid = _require_admin(handler)
     data = _read_json(handler)
     bid = book_service.add_book(data.get("title", ""), data.get("author", ""),
                                 data.get("category", ""))
+    _audit("add_book", aid, data.get("title", ""))
     return _ok(handler, {"id": bid}, status=201)
 
 
 @_register("PUT", r"/api/books/(?P<bid>\d+)")
 def update_book(handler, bid):
-    _require_admin(handler)
+    aid = _require_admin(handler)
     data = _read_json(handler)
     book_service.update_book(int(bid), data.get("title", ""),
                              data.get("author", ""), data.get("category"))
+    _audit("update_book", aid, data.get("title", "") or "图书#%s" % bid)
     return _ok(handler, {"updated": True})
 
 
 @_register("POST", r"/api/books/(?P<bid>\d+)/tags")
 def set_book_tags(handler, bid):
-    _require_admin(handler)
+    aid = _require_admin(handler)
     data = _read_json(handler)
     ok, tags, msg = tag_service.set_tags(int(bid), data.get("tags", ""))
     if not ok:
         raise NotFoundError(msg)
+    _audit("set_tag", aid, "图书#%s" % bid, ",".join(tags))
     return _ok(handler, {"tags": tags, "message": msg})
 
 
 @_register("DELETE", r"/api/books/(?P<bid>\d+)")
 def delete_book(handler, bid):
-    _require_admin(handler)
+    aid = _require_admin(handler)
     book_service.delete_book(int(bid))
+    _audit("delete_book", aid, "图书#%s" % bid)
     return _ok(handler, {"deleted": True})
 
 
@@ -605,6 +646,7 @@ def borrow(handler):
     if not ok:
         # 借阅被拒是业务规则冲突（如已借出/超限/逾期），不是服务器错误
         raise BusinessRuleError(msg)
+    _audit("borrow", uid, "图书#%s" % data.get("book_id", 0), msg)
     return _ok(handler, {"message": msg})
 
 
@@ -615,6 +657,8 @@ def return_book(handler):
     penalty = borrow_service.return_book(uid, int(data.get("book_id", 0)))
     if penalty is False:
         raise NotFoundError("没有找到未归还的借阅记录")
+    _audit("return", uid, "图书#%s" % data.get("book_id", 0),
+           "罚款 %s 元" % penalty if penalty else "无罚款")
     return _ok(handler, {"penalty": penalty})
 
 
@@ -626,6 +670,7 @@ def renew(handler):
                                         int(data.get("days", 7)))
     if not ok:
         raise BusinessRuleError(msg)
+    _audit("renew", uid, "图书#%s" % data.get("book_id", 0), msg)
     return _ok(handler, {"message": msg})
 
 
@@ -702,6 +747,7 @@ def rate(handler, bid):
     uid = _require_user(handler)
     data = _read_json(handler)
     rating_service.rate(uid, int(bid), data.get("score"), data.get("comment", ""))
+    _audit("rate", uid, "图书#%s" % bid, "%s 分" % data.get("score"))
     return _ok(handler, {"rated": True})
 
 
@@ -714,6 +760,7 @@ def reserve_book(handler):
     ok, msg = reservation_service.reserve(uid, int(data.get("book_id", 0)))
     if not ok:
         raise BusinessRuleError(msg)
+    _audit("reserve", uid, "图书#%s" % data.get("book_id", 0))
     return _ok(handler, {"message": msg})
 
 
@@ -724,6 +771,7 @@ def cancel_reserve(handler):
     ok, msg = reservation_service.cancel(uid, int(data.get("book_id", 0)))
     if not ok:
         raise BusinessRuleError(msg)
+    _audit("cancel_reserve", uid, "图书#%s" % data.get("book_id", 0))
     return _ok(handler, {"message": msg})
 
 
