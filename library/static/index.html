@@ -383,6 +383,51 @@
         </table>
         <div class="empty" id="overdue-empty" style="display:none">当前没有逾期未还的图书</div>
       </div>
+
+      <h3 style="margin:22px 0 10px; font-size:15px">操作日志</h3>
+      <div class="admin-bar" style="display:flex">
+        <span class="badge">审计</span>
+        <label style="font-size:13px;color:var(--muted)">类型</label>
+        <select id="log-action">
+          <option value="">全部</option>
+          <option value="borrow">借阅</option>
+          <option value="return">归还</option>
+          <option value="renew">续借</option>
+          <option value="reserve">预约</option>
+          <option value="cancel_reserve">取消预约</option>
+          <option value="rate">评分</option>
+          <option value="recharge">充值</option>
+          <option value="pay_fine">缴罚款</option>
+          <option value="login">登录</option>
+          <option value="logout">退出</option>
+          <option value="register">注册</option>
+          <option value="change_password">改密</option>
+          <option value="reset_password">找回密码</option>
+          <option value="add_book">新增图书</option>
+          <option value="update_book">修改图书</option>
+          <option value="delete_book">删除图书</option>
+          <option value="set_tag">设标签</option>
+          <option value="set_rules">设规则</option>
+        </select>
+        <label style="font-size:13px;color:var(--muted)">条数</label>
+        <select id="log-limit">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+        <button class="small" id="btn-refresh-logs">刷新</button>
+        <span id="logs-total" style="color:var(--muted);font-size:13px;margin-left:6px"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>时间</th><th>用户</th><th>操作</th><th>对象</th><th>详情</th></tr>
+          </thead>
+          <tbody id="logs-rows"></tbody>
+        </table>
+        <div class="empty" id="logs-empty" style="display:none">暂无日志</div>
+      </div>
     </div>
   </div>
 
@@ -609,7 +654,7 @@
       const tasks = [loadStats(), loadTags(), loadBooks(), loadMyBorrows(),
                      loadMyReservations(), loadRanks(), loadDueSoon(),
                      loadNotifications()];
-      if (isAdmin) { tasks.push(loadAdmin()); tasks.push(loadRules()); }
+      if (isAdmin) { tasks.push(loadAdmin()); tasks.push(loadRules()); tasks.push(loadLogs()); }
       await Promise.all(tasks);
     } catch (e) { toast(e.message, true); }
   }
@@ -1005,6 +1050,32 @@
       });
     } catch (e) { /* 非管理员静默 */ }
   }
+  async function loadLogs() {
+    if (!isAdmin) return;
+    try {
+      const action = $("log-action").value;
+      const limit = $("log-limit").value;
+      const qs = new URLSearchParams();
+      if (action) qs.set("action", action);
+      if (limit) qs.set("limit", limit);
+      const d = await api("GET", "/api/admin/logs?" + qs.toString());
+      const rows = d.logs || [];
+      const tb = $("logs-rows");
+      tb.innerHTML = "";
+      $("logs-empty").style.display = rows.length ? "none" : "";
+      rows.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + esc(r.log_time || "") + "</td>" +
+          "<td>" + esc(r.username || "—") + "</td>" +
+          "<td>" + esc(r.action_text || r.action || "") + "</td>" +
+          "<td>" + esc(r.target || "") + "</td>" +
+          "<td>" + esc(r.detail || "") + "</td>";
+        tb.appendChild(tr);
+      });
+      $("logs-total").textContent = (d.total != null) ? ("共 " + d.total + " 条") : "";
+    } catch (e) { toast(e.message, true); }
+  }
   function openRecharge(uid) {
     rechargeUid = uid;
     $("f-amount").value = ""; $("recharge-err").textContent = "";
@@ -1203,6 +1274,9 @@
   $("btn-export-all").onclick = () => downloadCsv("/api/export/all-borrows", "all_borrows.csv");
   $("btn-pay-fine").onclick = payFine;
   $("btn-save-rules").onclick = saveRules;
+  $("btn-refresh-logs").onclick = loadLogs;
+  $("log-action").onchange = loadLogs;
+  $("log-limit").onchange = loadLogs;
   $("btn-cancel-history").onclick = () => { $("history-mask").style.display = "none"; };
   $("history-mask").addEventListener("click", (e) => { if (e.target === $("history-mask")) $("history-mask").style.display = "none"; });
   $("btn-clear-tag").onclick = () => { currentTags = []; loadBooks(); loadTags(); };
