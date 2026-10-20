@@ -10,7 +10,7 @@ from rules import *
 from reservation import *
 from report import build_html, export_html_report
 from tag import *
-from log import get_logs, get_action_stats, clear_logs, action_text, get_log_count
+from log import init_log_table, get_logs, get_action_stats, clear_logs, action_text, get_log_count
 from db import init_db
 import theme as _theme
 from theme import (LIGHT, DARK, COLOR_OPTIONS,
