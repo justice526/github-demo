@@ -36,6 +36,7 @@
     GET    /api/admin/borrows      全部借阅记录（管理员）
     GET    /api/admin/overdue      逾期未还报表（管理员）
     GET    /api/admin/logs         操作审计日志（管理员，?limit=&action=&user_id=，含统计）
+    GET    /api/admin/logs/export  导出操作审计日志 CSV（管理员，?limit=&action=&user_id=）
     GET    /api/my/due-soon        即将到期提醒（?days=，默认 3 天）
     GET    /api/my/stats           我的借阅统计
     GET    /api/books/<id>/history 某书借阅历史
@@ -496,6 +497,20 @@ def admin_logs(handler):
     logs = log_service.query(limit, action, uid_filter)
     return _ok(handler, {"logs": logs, "total": log_service.count(),
                          "stats": log_service.action_stats()})
+
+
+@_register("GET", r"/api/admin/logs/export")
+def admin_logs_export(handler):
+    """导出操作审计日志为 CSV（管理员，可加 action/user_id/limit 过滤）"""
+    _require_admin(handler)
+    qs = parse_qs(urlparse(handler.path).query)
+    limit = int((qs.get("limit") or ["2000"])[0])
+    limit = max(1, min(limit, 5000))  # 上限保护，避免一次性导出过大
+    action = (qs.get("action") or [""])[0].strip() or None
+    uid_raw = (qs.get("user_id") or [""])[0].strip()
+    uid_filter = int(uid_raw) if uid_raw.isdigit() else None
+    _csv_response(handler, "operation_logs.csv",
+                  log_service.csv_logs(action, uid_filter, limit))
 
 
 # ---- 余额 / 罚款 / 规则 ----

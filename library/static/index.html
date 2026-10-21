@@ -417,6 +417,7 @@
           <option value="500">500</option>
         </select>
         <button class="small" id="btn-refresh-logs">刷新</button>
+        <button class="small" id="btn-export-logs">导出 CSV</button>
         <span id="logs-total" style="color:var(--muted);font-size:13px;margin-left:6px"></span>
       </div>
       <div class="table-wrap">
@@ -1076,6 +1077,15 @@
       $("logs-total").textContent = (d.total != null) ? ("共 " + d.total + " 条") : "";
     } catch (e) { toast(e.message, true); }
   }
+  async function exportLogsCsv() {
+    if (!isAdmin) return;
+    const action = $("log-action").value;
+    const limit = $("log-limit").value || "2000";
+    const qs = new URLSearchParams();
+    if (action) qs.set("action", action);
+    qs.set("limit", limit);
+    await downloadCsv("/api/admin/logs/export?" + qs.toString(), "operation_logs.csv");
+  }
   function openRecharge(uid) {
     rechargeUid = uid;
     $("f-amount").value = ""; $("recharge-err").textContent = "";
@@ -1277,6 +1287,7 @@
   $("btn-refresh-logs").onclick = loadLogs;
   $("log-action").onchange = loadLogs;
   $("log-limit").onchange = loadLogs;
+  $("btn-export-logs").onclick = exportLogsCsv;
   $("btn-cancel-history").onclick = () => { $("history-mask").style.display = "none"; };
   $("history-mask").addEventListener("click", (e) => { if (e.target === $("history-mask")) $("history-mask").style.display = "none"; });
   $("btn-clear-tag").onclick = () => { currentTags = []; loadBooks(); loadTags(); };

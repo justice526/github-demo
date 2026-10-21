@@ -4,6 +4,9 @@
 `write()` 内部吞掉所有异常并返回 False，调用方无需 try/except。
 """
 
+import csv
+import io
+
 from repository import log_repo, user_repo
 
 # 动作码 → 中文文案
@@ -86,3 +89,21 @@ def clear():
         return True, "没有需要清空的日志"
     n = log_repo.clear_all()
     return True, f"已清空 {n} 条操作日志" if n else "没有需要清空的日志"
+
+
+def csv_logs(action=None, user_id=None, limit=2000):
+    """操作日志 CSV 文本（utf-8-sig，供 Web 下载）
+
+    :param action: 按动作码过滤，None 表示全部
+    :param user_id: 按用户过滤，None 表示全部
+    :param limit: 导出最大条数，默认 2000
+    :return: 带 BOM 的 CSV 字符串（Excel 不乱码）
+    """
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["时间", "用户", "操作", "动作码", "对象", "详情"])
+    for r in log_repo.find_logs(limit, action, user_id):
+        # r: (id, user_id, username, action, target, detail, log_time)
+        w.writerow([r[6], r[2] or "", action_text(r[3]), r[3] or "",
+                    r[4] or "", r[5] or ""])
+    return "\ufeff" + buf.getvalue()
