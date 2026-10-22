@@ -22,7 +22,8 @@
 
 接口一览（响应均为 JSON）::
 
-    GET    /health                 健康检查
+    GET    /health                 健康检查（存活探针）
+    GET    /ready                  就绪探针（检查数据库可达，不可达返回 503）
     POST   /api/login              登录，返回 token + refresh_token
     POST   /api/refresh            用 refresh_token 换新令牌（轮换吊销旧令牌）
     POST   /api/logout             吊销 refresh_token
@@ -74,6 +75,7 @@
 import json
 import os
 import re
+import signal
 import sys
 import threading
 import time
@@ -84,7 +86,7 @@ from core import jwt
 from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
                          ValidationError, BusinessRuleError, RateLimitError)
 from core.errors import http_status_of
-from core.db import get_conn, close_connection
+from core.db import get_conn, close_connection, query_one
 from repository import (book_repo, borrow_repo, tag_repo, refresh_token_repo,
                        notification_repo, log_repo)
 from service import (book_service, user_service, borrow_service,
@@ -359,6 +361,21 @@ def _register(method, path_regex):
 @_register("GET", r"/health")
 def health(handler):
     return _ok(handler, {"status": "up", "books": book_repo.count_all()})
+
+
+@_register("GET", r"/ready")
+def ready(handler):
+    """就绪探针：检查数据库可达；不可达返回 503（供编排器 readiness 探测）"""
+    try:
+        query_one("SELECT 1")
+        return _ok(handler, {"status": "ready"})
+    except Exception:
+        handler.send_response(503)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        _emit_common_headers(handler)
+        handler.end_headers()
+        handler.wfile.write(json.dumps({"ok": False, "status": "not_ready"}).encode("utf-8"))
+        return None
 
 
 @_register("POST", r"/api/login")
@@ -856,13 +873,27 @@ def run(host="127.0.0.1", port=8000):
     server = ThreadingHTTPServer((host, port), ApiHandler)
     print(f"图书管理系统 REST API 已启动：http://{host}:{port}")
     print("健康检查：curl http://%s:%s/health" % (host, port))
+    print("就绪探针：curl http://%s:%s/ready" % (host, port))
+
+    def _handle_signal(signum, _frame):
+        print("\n收到停止信号 (%s)，准备优雅停机…" % signum)
+        # shutdown() 必须在 serve_forever() 所在线程之外的线程调用，否则会死锁
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    # 注册优雅停机信号：SIGINT=Ctrl+C，SIGTERM=Docker/systemd 等编排器停止
+    try:
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+    except (ValueError, OSError):
+        # 非主线程或平台不支持信号时静默忽略
+        pass
+
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n已停止")
     finally:
         server.server_close()
         close_connection()
+        print("已停止")
 
 
 if __name__ == "__main__":
