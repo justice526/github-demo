@@ -73,12 +73,15 @@
 """
 
 import json
+import logging
 import os
 import re
 import signal
 import sys
 import threading
 import time
+import uuid
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -87,6 +90,15 @@ from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
                          ValidationError, BusinessRuleError, RateLimitError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection, query_one
+
+# 结构化访问日志（12-factor：JSON 行输出到 stderr，便于采集；不污染业务 stdout）
+_access_logger = logging.getLogger("library.access")
+if not _access_logger.handlers:
+    _access_handler = logging.StreamHandler(sys.stderr)
+    _access_handler.setFormatter(logging.Formatter("%(message)s"))
+    _access_logger.addHandler(_access_handler)
+    _access_logger.setLevel(logging.INFO)
+    _access_logger.propagate = False
 from repository import (book_repo, borrow_repo, tag_repo, refresh_token_repo,
                        notification_repo, log_repo)
 from service import (book_service, user_service, borrow_service,
@@ -253,7 +265,8 @@ def _csv_response(handler, filename, content):
 def _fail(handler, exc):
     status = http_status_of(exc)
     payload = {"ok": False, "code": getattr(exc, "code", "error"),
-               "message": str(exc.message) if isinstance(exc, AppError) else str(exc)}
+               "message": str(exc.message) if isinstance(exc, AppError) else str(exc),
+               "req_id": getattr(handler, "_req_id", None)}
     _json_response(handler, status, payload)
 
 
@@ -262,6 +275,36 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     # 路由表： (方法, 正则) -> 处理函数
     ROUTES = []
+
+    def __init__(self, *args, **kwargs):
+        # 必须在 super().__init__() 之前设置：基类 __init__ 内部会调用
+        # handle()→请求处理→send_response()→log_request()，彼时就要用这两个字段
+        self._req_id = uuid.uuid4().hex[:12]
+        self._req_start = time.time()
+        super().__init__(*args, **kwargs)
+
+    def log_request(self, code='-', size='-'):
+        """结构化访问日志（JSON 行）：方法、路径、状态码、耗时、客户端、请求 ID
+
+        send_response() 会以真实状态码调用本方法；handle_one_request 末尾可能
+        再以无参方式调用一次（占位 '-'），此处跳过以避免重复/无意义日志。
+        """
+        if code == '-':
+            return
+        try:
+            status = int(code)
+        except (TypeError, ValueError):
+            status = code
+        rec = {
+            "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "req_id": self._req_id,
+            "method": self.command,
+            "path": self.path.split("?")[0],
+            "status": status,
+            "ms": round((time.time() - self._req_start) * 1000, 1),
+            "client": self.client_address[0] if self.client_address else "-",
+        }
+        _access_logger.info(json.dumps(rec, ensure_ascii=False))
 
     def _dispatch(self, method, path):
         """返回 (是否匹配, 处理函数返回值)。
