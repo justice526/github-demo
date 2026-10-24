@@ -87,7 +87,8 @@ from urllib.parse import urlparse, parse_qs
 
 from core import jwt
 from core.errors import (AppError, AuthError, PermissionError_, NotFoundError,
-                         ValidationError, BusinessRuleError, RateLimitError)
+                         ValidationError, BusinessRuleError, RateLimitError,
+                         PayloadTooLargeError)
 from core.errors import http_status_of
 from core.db import get_conn, close_connection, query_one
 
@@ -183,6 +184,10 @@ def _rate_allowed(handler):
         return bucket[1] <= RATE_LIMIT
 
 
+# JSON API 请求体上限：1 MiB。超大体请求直接拒绝，防止恶意 Content-Length 撑爆内存（DoS）。
+MAX_BODY_BYTES = 1 << 20
+
+
 def _read_json(handler):
     """读取并解析 JSON 请求体；空 body 返回 {}"""
     try:
@@ -191,6 +196,8 @@ def _read_json(handler):
         raise ValidationError("请求体长度非法")
     if length <= 0:
         return {}
+    if length > MAX_BODY_BYTES:
+        raise PayloadTooLargeError("请求体过大（上限 %d 字节）" % MAX_BODY_BYTES)
     raw = handler.rfile.read(length)
     if not raw:
         return {}

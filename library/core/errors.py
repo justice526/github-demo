@@ -9,7 +9,7 @@
 __all__ = [
     "AppError", "ValidationError", "NotFoundError", "PermissionError_",
     "ConflictError", "BusinessRuleError", "AuthError", "DatabaseError",
-    "RateLimitError", "to_user_message",
+    "RateLimitError", "PayloadTooLargeError", "to_user_message",
 ]
 
 
@@ -98,6 +98,13 @@ class RateLimitError(AppError):
     default_message = "请求过于频繁，请稍后再试"
 
 
+class PayloadTooLargeError(AppError):
+    """请求体过大：超过服务端允许的最大体积，应返回 413"""
+
+    default_code = "payload_too_large"
+    default_message = "请求体过大"
+
+
 # 异常类型 → 建议的 HTTP 状态码，供将来的 Web 层直接复用
 HTTP_STATUS = {
     ValidationError: 400,
@@ -108,6 +115,7 @@ HTTP_STATUS = {
     BusinessRuleError: 422,
     DatabaseError: 500,
     RateLimitError: 429,
+    PayloadTooLargeError: 413,
 }
 
 
