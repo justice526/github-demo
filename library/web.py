@@ -113,14 +113,9 @@ notification_repo.init_table()
 log_repo.init_table()
 close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
-# ===== 生产加固配置（来自环境变量，缺省为演示值；生产务必设置 JWT_SECRET）=====
-JWT_SECRET = os.environ.get("JWT_SECRET", "dev-only-insecure-secret-change-me")
-ACCESS_TTL = int(os.environ.get("ACCESS_TTL", "1800"))       # 访问令牌寿命（秒）
-REFRESH_TTL = int(os.environ.get("REFRESH_TTL", "604800"))   # 刷新令牌寿命（秒，默认 7 天）
-RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "600"))        # 单 IP 每窗口允许请求数
-RATE_WINDOW = int(os.environ.get("RATE_WINDOW", "60"))       # 限流窗口（秒）
-# CORS 白名单（逗号分隔的源）；为空表示仅同源，不暴露跨域头（禁用通配符）
-_CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGIN", "").split(",") if o.strip()]
+# ===== 生产加固配置（集中来自环境变量 / .env，详见 core/config.py）=====
+from core.config import (JWT_SECRET, ACCESS_TTL, REFRESH_TTL, RATE_LIMIT,
+                         RATE_WINDOW, CORS_ORIGINS as _CORS_ORIGINS)
 
 # 限流计数（按客户端 IP 的固定窗口），进程内存态，演示够用
 _RATE_LOCK = threading.Lock()
@@ -924,6 +919,11 @@ def run(host="127.0.0.1", port=8000):
     print(f"图书管理系统 REST API 已启动：http://{host}:{port}")
     print("健康检查：curl http://%s:%s/health" % (host, port))
     print("就绪探针：curl http://%s:%s/ready" % (host, port))
+
+    # 启动集中校验：非法数值已在导入期快速失败；此处打印非致命告警（如默认密钥）
+    from core import config
+    for _w in config.validate():
+        print("⚠️  配置告警：", _w)
 
     def _handle_signal(signum, _frame):
         print("\n收到停止信号 (%s)，准备优雅停机…" % signum)
