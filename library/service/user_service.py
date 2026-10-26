@@ -3,7 +3,7 @@
 承载注册校验、登录、密保校验、余额规则等业务逻辑。
 """
 
-from core import db
+from core import db, security
 from core.errors import (ValidationError, NotFoundError, AuthError,
                          ConflictError, BusinessRuleError)
 from repository import user_repo, borrow_repo
@@ -31,7 +31,9 @@ def register(username, password, security_q="", security_a=""):
         raise ValidationError(f"密码至少 {MIN_PASSWORD_LEN} 位")
     if user_repo.exists_username(username):
         raise ConflictError(f"用户名「{username}」已被注册")
-    return user_repo.insert(username, password, 0.0, 0, security_q, security_a)
+    # 密码不落库明文：注册时即加盐哈希
+    return user_repo.insert(username, security.hash_password(password),
+                            0.0, 0, security_q, security_a)
 
 
 def login(username, password):
@@ -41,8 +43,14 @@ def login(username, password):
     :raises AuthError: 账号或密码错误
     """
     row = user_repo.find_by_username((username or "").strip())
-    if not row or row[2] != password:
+    if not row:
         raise AuthError("账号或密码错误")
+    stored = row[2]
+    if not security.verify_password(password, stored):
+        raise AuthError("账号或密码错误")
+    # 遗留明文升级：成功登录后就地哈希，避免长期明文留存
+    if security.is_legacy_plaintext(stored):
+        user_repo.update_password(row[0], security.hash_password(password))
     return row[0]
 
 
@@ -102,7 +110,7 @@ def modify_password(user_id, old_pwd, new_pwd):
         raise ValidationError(f"新密码至少 {MIN_PASSWORD_LEN} 位")
     if not user_repo.password_matches(user_id, old_pwd):
         raise AuthError("原密码不正确")
-    user_repo.update_password(user_id, new_pwd)
+    user_repo.update_password(user_id, security.hash_password(new_pwd))
     return True
 
 
@@ -124,7 +132,7 @@ def reset_password_by_qa(username, security_ans, new_pwd):
     if (a or "").strip() != (security_ans or "").strip():
         raise AuthError("密保答案不正确")
     row = user_repo.find_by_username(username.strip())
-    user_repo.update_password(row[0], new_pwd)
+    user_repo.update_password(row[0], security.hash_password(new_pwd))
     return True
 
 

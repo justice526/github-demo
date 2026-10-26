@@ -7,7 +7,7 @@
 将来换表或加缓存只改这一处。
 """
 
-from core import db
+from core import db, security
 
 
 def _to_tuple(row):
@@ -86,9 +86,11 @@ def update_password(user_id, new_password):
 
 
 def password_matches(user_id, password):
-    """校验密码是否匹配（修改密码时用）"""
-    return db.query_one("SELECT 1 FROM user WHERE id = ? AND password = ?",
-                        (user_id, password)) is not None
+    """校验密码是否匹配（修改密码时用）；支持遗留明文兼容"""
+    row = db.query_one("SELECT password FROM user WHERE id = ?", (user_id,))
+    if not row:
+        return False
+    return security.verify_password(password, row[0])
 
 
 def add_balance(user_id, delta):
