@@ -540,51 +540,97 @@
 <script>
   const $ = (id) => document.getElementById(id);
   let token = null, refreshToken = null, currentUser = null, isAdmin = false,
-      page = 1, pageSize = 10, refreshing = false;
+      page = 1, pageSize = 10;
   let myReserveBookIds = new Set(), includeResHistory = false;
   let currentQuery = "", booksCache = [], editingId = null, currentTags = [], tagMatch = "any", tagPrefillOk = false;
   let notifTimer = null;
 
-  // ===== 基础请求封装（含访问令牌过期自动续期）=====
+  // ===== 基础请求封装：401 自动续期 / 5xx 幂等重试 / 离线提示 =====
+  // ==RETRY-BEGIN==
+  const API_MAX_RETRIES = 3;           // 5xx 与网络错误的最大自动重试次数
+  let refreshPromise = null;            // 进行中的刷新请求（并发 401 复用同一次刷新）
+
+  // 幂等方法才允许自动重试，避免 POST 等写操作被重复执行（重复借书/扣款）
+  function isIdempotentMethod(method) {
+    return /^(GET|HEAD|OPTIONS|PUT|DELETE)$/i.test(method || "");
+  }
+  function isRetryableStatus(status) {
+    return status >= 500 && status <= 599;
+  }
+  // 指数退避（有上限）：第 1/2/3 次分别约 300/600/1200ms
+  function backoffDelay(attempt) {
+    return Math.min(300 * Math.pow(2, attempt - 1), 3000);
+  }
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // fetch 彻底失败时的离线提示（复用 toast）
+  function showOffline() {
+    try { toast("网络连接失败，请检查网络后重试", true); } catch (e) { /* 忽略 */ }
+  }
+
+  // 用刷新令牌换取新的访问令牌（并轮换刷新令牌）；并发调用共享同一次刷新
+  async function doRefresh() {
+    if (!refreshToken) return false;
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = (async () => {
+      try {
+        const res = await fetch("/api/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          token = data.data.token;
+          refreshToken = data.data.refresh_token;  // 服务端已吊销旧刷新令牌
+          return true;
+        }
+        return false;
+      } catch (e) {
+        return false;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+    return refreshPromise;
+  }
+
   async function api(method, path, body, _retry = true) {
     const opts = { method, headers: { "Content-Type": "application/json" } };
     if (token) opts.headers["Authorization"] = "Bearer " + token;
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(path, opts);
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok !== false) return data.data;
-    // 访问令牌失效（401）时尝试用刷新令牌续期，仅重试一次，避免雪崩
-    if (res.status === 401 && refreshToken && _retry && !refreshing) {
-      const ok = await doRefresh();
-      if (ok) return api(method, path, body, false);
-    }
-    if (res.status === 401) logout();  // 续期失败：强制登出
-    throw new Error(data.message || ("请求失败（" + res.status + "）"));
-  }
-
-  // 用刷新令牌换取新的访问令牌（并轮换刷新令牌），成功返回 true
-  async function doRefresh() {
-    if (!refreshToken) return false;
-    refreshing = true;
-    try {
-      const res = await fetch("/api/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.ok) {
-        token = data.data.token;
-        refreshToken = data.data.refresh_token;  // 服务端已吊销旧刷新令牌
-        return true;
+    let attempt = 0;
+    for (;;) {
+      let res;
+      try {
+        res = await fetch(path, opts);
+      } catch (e) {
+        // 网络层失败：仅幂等方法重试，避免重复副作用；重试耗尽后提示离线
+        if (isIdempotentMethod(method) && attempt < API_MAX_RETRIES) {
+          attempt++; await sleep(backoffDelay(attempt)); continue;
+        }
+        showOffline();
+        throw new Error("网络连接失败，请检查网络后重试");
       }
-      return false;
-    } catch (e) {
-      return false;
-    } finally {
-      refreshing = false;
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok !== false) return data.data;
+      // 访问令牌失效（401）：刷新后仅重试一次（401 表示请求已被拒绝，无副作用）
+      if (res.status === 401 && refreshToken && _retry) {
+        const ok = await doRefresh();
+        if (ok) return api(method, path, body, false);
+      }
+      // 5xx：仅幂等方法自动重试，避免非幂等写重复执行
+      if (isRetryableStatus(res.status) && isIdempotentMethod(method)
+          && attempt < API_MAX_RETRIES) {
+        attempt++; await sleep(backoffDelay(attempt)); continue;
+      }
+      if (res.status === 401) logout();  // 刷新失败：强制登出
+      throw new Error(data.message || ("请求失败（" + res.status + "）"));
     }
   }
+  // ==RETRY-END==
 
   function toast(msg, isErr) {
     const t = $("toast");
