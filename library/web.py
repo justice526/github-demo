@@ -210,6 +210,11 @@ _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
+    # 关闭不必要的强能力（摄像头/麦克风/定位/支付/USB）
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    # 隔离跨源窗口引用与资源嵌入
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
     "Content-Security-Policy":
         "default-src 'self'; img-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
@@ -224,8 +229,12 @@ def _cors_origin(handler):
     return origin if origin in _CORS_ORIGINS else _CORS_ORIGINS[0]
 
 
-def _emit_common_headers(handler):
-    """附加 CORS（若配置）与安全头，供所有响应复用"""
+def _emit_common_headers(handler, cache="no-store"):
+    """附加 CORS（若配置）、安全头与缓存策略，供所有响应复用。
+
+    cache：API/CSV 默认 ``no-store``（响应含令牌/审计等敏感数据，禁止缓存）；
+    首页 HTML 传 ``no-cache``（可缓存但每次需回源校验，便于前端更新生效）。
+    """
     origin = _cors_origin(handler)
     if origin:
         handler.send_header("Access-Control-Allow-Origin", origin)
@@ -233,6 +242,8 @@ def _emit_common_headers(handler):
         handler.send_header("Vary", "Origin")
     for k, v in _SECURITY_HEADERS.items():
         handler.send_header(k, v)
+    if cache:
+        handler.send_header("Cache-Control", cache)
 
 
 def _json_response(handler, status, payload):
@@ -369,7 +380,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        _emit_common_headers(self)
+        _emit_common_headers(self, cache="no-cache")
         self.end_headers()
         self.wfile.write(body)
 
