@@ -106,11 +106,9 @@ from service import (book_service, user_service, borrow_service,
                      rating_service, reservation_service, tag_service,
                      rules_service, notification_service, log_service)
 
-# 标签与刷新令牌表：导入时幂等建表，保证任何启动路径表都存在。
-tag_repo.init_table()
-refresh_token_repo.init_table()
-notification_repo.init_table()
-log_repo.init_table()
+# 数据库迁移：按版本顺序应用（幂等；既有库仅登记基线，不重建表）
+from core import migrations
+migrations.apply_all()
 close_connection()  # 释放导入线程（主线程）持有的连接，避免退出/测试时文件锁
 
 # ===== 生产加固配置（集中来自环境变量 / .env，详见 core/config.py）=====
