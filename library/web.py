@@ -203,6 +203,31 @@ def _read_json(handler):
     return data
 
 
+def _as_int(value, field, default=None, min_value=None, max_value=None):
+    """把客户端传入的值安全转为整数（边界校验）。
+
+    - 缺省（None/空串）且有 default → 返回 default；否则报「缺少参数」
+    - 非整数（如 "abc"）→ ValidationError(400)，而不是让 int() 抛错变成 500
+    - 小于 min_value → ValidationError(400)
+    - 大于 max_value → 钳制到 max_value（避免超大分页/导出）
+    """
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        if default is not None:
+            return default
+        raise ValidationError("缺少参数：%s" % field)
+    if isinstance(value, bool):        # bool 是 int 子类，显式排除
+        raise ValidationError("参数 %s 必须为整数" % field)
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError("参数 %s 必须为整数" % field)
+    if min_value is not None and n < min_value:
+        raise ValidationError("参数 %s 不能小于 %d" % (field, min_value))
+    if max_value is not None and n > max_value:
+        n = max_value
+    return n
+
+
 # 统一附加的安全响应头
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -561,7 +586,8 @@ def admin_logs(handler):
     """操作审计日志（管理员）：可按 action / user_id 过滤，含动作统计与总数"""
     _require_admin(handler)
     qs = parse_qs(urlparse(handler.path).query)
-    limit = int((qs.get("limit") or ["100"])[0])
+    limit = _as_int((qs.get("limit") or ["100"])[0], "limit",
+                    default=100, min_value=1, max_value=5000)
     action = (qs.get("action") or [""])[0].strip() or None
     uid_raw = (qs.get("user_id") or [""])[0].strip()
     uid_filter = int(uid_raw) if uid_raw.isdigit() else None
@@ -575,8 +601,8 @@ def admin_logs_export(handler):
     """导出操作审计日志为 CSV（管理员，可加 action/user_id/limit 过滤）"""
     _require_admin(handler)
     qs = parse_qs(urlparse(handler.path).query)
-    limit = int((qs.get("limit") or ["2000"])[0])
-    limit = max(1, min(limit, 5000))  # 上限保护，避免一次性导出过大
+    limit = _as_int((qs.get("limit") or ["2000"])[0], "limit",
+                    default=2000, min_value=1, max_value=5000)  # 上限保护
     action = (qs.get("action") or [""])[0].strip() or None
     uid_raw = (qs.get("user_id") or [""])[0].strip()
     uid_filter = int(uid_raw) if uid_raw.isdigit() else None
@@ -639,8 +665,9 @@ def list_books(handler):
         tags = qs.get("tags")[0].split(",")
     tags = [t.strip() for t in tags if t.strip()]
     match = (qs.get("match") or ["any"])[0].lower()
-    page = int((qs.get("page") or ["1"])[0])
-    size = int((qs.get("size") or ["20"])[0])
+    page = _as_int((qs.get("page") or ["1"])[0], "page", default=1, min_value=1)
+    size = _as_int((qs.get("size") or ["20"])[0], "size",
+                   default=20, min_value=1, max_value=100)
     if tags:
         books = tag_service.filter_books(tags, match_all=(match == "all"))
     elif q:
@@ -656,14 +683,16 @@ def list_books(handler):
 @_register("GET", r"/api/books/rank")
 def rank_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
-    top_n = int((qs.get("top") or ["10"])[0])
+    top_n = _as_int((qs.get("top") or ["10"])[0], "top",
+                    default=10, min_value=1, max_value=100)
     return _ok(handler, {"rank": book_service.hot_rank(top_n)})
 
 
 @_register("GET", r"/api/books/top-rated")
 def top_rated_books(handler):
     qs = parse_qs(urlparse(handler.path).query)
-    top_n = int((qs.get("top") or ["10"])[0])
+    top_n = _as_int((qs.get("top") or ["10"])[0], "top",
+                    default=10, min_value=1, max_value=100)
     return _ok(handler, {"items": rating_service.top_rated(top_n)})
 
 
@@ -728,7 +757,8 @@ def delete_book(handler, bid):
 def borrow(handler):
     uid = _require_user(handler)
     data = _read_json(handler)
-    ok, msg = borrow_service.borrow_book(uid, int(data.get("book_id", 0)))
+    ok, msg = borrow_service.borrow_book(
+        uid, _as_int(data.get("book_id"), "book_id", min_value=1))
     if not ok:
         # 借阅被拒是业务规则冲突（如已借出/超限/逾期），不是服务器错误
         raise BusinessRuleError(msg)
@@ -740,7 +770,8 @@ def borrow(handler):
 def return_book(handler):
     uid = _require_user(handler)
     data = _read_json(handler)
-    penalty = borrow_service.return_book(uid, int(data.get("book_id", 0)))
+    penalty = borrow_service.return_book(
+        uid, _as_int(data.get("book_id"), "book_id", min_value=1))
     if penalty is False:
         raise NotFoundError("没有找到未归还的借阅记录")
     _audit("return", uid, "图书#%s" % data.get("book_id", 0),
@@ -752,8 +783,10 @@ def return_book(handler):
 def renew(handler):
     uid = _require_user(handler)
     data = _read_json(handler)
-    ok, msg = borrow_service.renew_book(uid, int(data.get("book_id", 0)),
-                                        int(data.get("days", 7)))
+    ok, msg = borrow_service.renew_book(
+        uid,
+        _as_int(data.get("book_id"), "book_id", min_value=1),
+        _as_int(data.get("days"), "days", default=7, min_value=1, max_value=365))
     if not ok:
         raise BusinessRuleError(msg)
     _audit("renew", uid, "图书#%s" % data.get("book_id", 0), msg)
@@ -788,7 +821,8 @@ def my_due_soon(handler):
     """即将到期提醒（默认 3 天内，?days= 可调）"""
     uid = _require_user(handler)
     qs = parse_qs(urlparse(handler.path).query)
-    days = int((qs.get("days") or ["3"])[0])
+    days = _as_int((qs.get("days") or ["3"])[0], "days",
+                   default=3, min_value=1, max_value=365)
     return _ok(handler, {"items": borrow_service.due_soon_books(uid, days)})
 
 
@@ -843,7 +877,8 @@ def rate(handler, bid):
 def reserve_book(handler):
     uid = _require_user(handler)
     data = _read_json(handler)
-    ok, msg = reservation_service.reserve(uid, int(data.get("book_id", 0)))
+    ok, msg = reservation_service.reserve(
+        uid, _as_int(data.get("book_id"), "book_id", min_value=1))
     if not ok:
         raise BusinessRuleError(msg)
     _audit("reserve", uid, "图书#%s" % data.get("book_id", 0))
@@ -854,7 +889,8 @@ def reserve_book(handler):
 def cancel_reserve(handler):
     uid = _require_user(handler)
     data = _read_json(handler)
-    ok, msg = reservation_service.cancel(uid, int(data.get("book_id", 0)))
+    ok, msg = reservation_service.cancel(
+        uid, _as_int(data.get("book_id"), "book_id", min_value=1))
     if not ok:
         raise BusinessRuleError(msg)
     _audit("cancel_reserve", uid, "图书#%s" % data.get("book_id", 0))
